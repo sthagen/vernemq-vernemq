@@ -143,6 +143,7 @@ vmq_server_metrics_cmd() ->
                                 Val -> Val
                             end,
                 LabelFlags = get_label_flags(Flags, LabelFlagSpecs),
+                TextLines =
                 lists:foldl(
                   fun({#metric_def{type = Type,
                                    labels = _Labels,
@@ -150,25 +151,38 @@ vmq_server_metrics_cmd() ->
                                    description = Description}, Val}, Acc) ->
                           SType = atom_to_list(Type),
                           SMetric = atom_to_list(Metric),
-                          SVal =
+                          Lines =
                               case Val of
-                                  V when is_integer(V) ->
-                                      integer_to_list(V);
-                                  V when is_float(V) ->
-                                      float_to_list(V)
+                                  V when is_number(V) ->
+                                      [SType, ".", SMetric, " = ", number_to_list(V)];
+                                  {Count, Sum, Buckets} when is_map(Buckets) ->
+                                      HistogramLines =
+                                      [
+                                       [SType, ".", SMetric, "_count = ", number_to_list(Count), "\n"],
+                                       [SType, ".", SMetric, "_sum = ", number_to_list(Sum), "\n"]
+                                      ],
+
+                                      maps:fold(
+                                        fun
+                                            (Bucket, BucketCnt, HistAcc) ->
+                                                [[SType, ".", SMetric, "_bucket_",
+                                                  case Bucket of
+                                                      infinity -> "infinity";
+                                                      _ -> number_to_list(Bucket)
+                                                  end ," = ", number_to_list(BucketCnt), "\n"]  | HistAcc]
+                                        end, HistogramLines, Buckets)
                               end,
-                          Line = [SType, ".", SMetric, " = ", SVal],
                           case Describe of
                               true ->
-                                  [clique_status:text(lists:flatten(["# ", Description])),
-                                   clique_status:text(lists:flatten([Line, "\n"]))|Acc];
+                                  ["# ", Description, "\n", Lines,"\n\n"| Acc];
                               false ->
-                                  [clique_status:text(lists:flatten(Line))|Acc]
+                                  [Lines, "\n" | Acc]
                           end
                   end,
                   [],
                   vmq_metrics:metrics(#{labels => LabelFlags,
-                                        aggregate => Aggregate}))
+                                        aggregate => Aggregate})),
+                [clique_status:text(lists:flatten(TextLines))]
         end,
     clique:register_command(Cmd, [], FlagSpecs, Callback).
 
@@ -260,7 +274,7 @@ vmq_cluster_leave_cmd() ->
                                                %% There is no guarantee that all clients will
                                                %% reconnect on time; we've to force migrate all
                                                %% offline queues.
-                                               vmq_reg:migrate_offline_queues(TargetNodes),
+                                               migrate_offline_queues(Caller, CRef, TargetNodes, 1000),
                                                %% node is online, we'll go the proper route
                                                %% instead of calling leave_cluster('Node')
                                                %% directly
@@ -268,7 +282,7 @@ vmq_cluster_leave_cmd() ->
                                                Caller ! {done, CRef},
                                                init:stop();
                                            error ->
-                                               Caller ! {msg, CRef, "error, still online queues, check the logs, and retry!"}
+                                               Caller ! {stop, CRef, "error, still online queues, check the logs, and retry!"}
                                        end
                                end,
                                ProcName = {?MODULE, vmq_server_migration},
@@ -278,14 +292,7 @@ vmq_cluster_leave_cmd() ->
                                            true ->
                                                Pid = spawn(Node, LeaveFun),
                                                MRef = monitor(process, Pid),
-                                               receive
-                                                   {msg, CRef, Msg} ->
-                                                       Msg;
-                                                   {done, CRef} ->
-                                                       "Done";
-                                                   {'DOWN', MRef, process, Pid, Reason} ->
-                                                       "Unknown error: " ++ atom_to_list(Reason)
-                                               end;
+                                               receive_loop(CRef, MRef, Pid);
                                            false ->
                                                "Can't migrate queues because cluster is inconsistent, retry!"
                                        end;
@@ -301,6 +308,39 @@ vmq_cluster_leave_cmd() ->
                        [clique_status:text(Text)]
                end,
     clique:register_command(Cmd, KeySpecs, FlagSpecs, Callback).
+
+receive_loop(CRef, MRef, Pid) ->
+    receive
+        {msg, CRef, Msg} ->
+            io:format("~s~n", [lists:flatten(Msg)]),
+            receive_loop(CRef, MRef, Pid);
+        {stop, CRef, Msg} ->
+            Msg;
+        {done, CRef} ->
+            "Done";
+        {'DOWN', MRef, process, Pid, Reason} ->
+            "Unknown error: " ++ atom_to_list(Reason)
+    end.
+
+migrate_offline_queues(Caller, CRef, TargetNodes, MaxConcurrency) ->
+    S = vmq_reg:prepare_offline_queue_migration(TargetNodes),
+    migrate(Caller, CRef, S, MaxConcurrency).
+
+migrate(Caller, CRef, S, MaxConcurrency) ->
+    {Progress, #{migrated_queue_cnt := MQCnt,
+                 migrated_msg_cnt := MMCnt,
+                 total_queue_count := TQCnt,
+                 total_msg_count := TMCnt} = S1} =
+        vmq_reg:migrate_offline_queues(S, MaxConcurrency),
+    Msg = io_lib:format("Migrated ~p/~p queues and ~p/~p messages", [MQCnt, TQCnt, MMCnt, TMCnt]),
+    Caller ! {msg, CRef, Msg},
+    case Progress of
+        cont ->
+            timer:sleep(100),
+            migrate(Caller, CRef, S1, MaxConcurrency);
+        done ->
+            ok
+    end.
 
 leave_cluster(Node) ->
     case vmq_peer_service:leave(Node) of
@@ -611,3 +651,6 @@ ensure_all_stopped([], Res) -> Res.
 
 remove_ok({ok, Res}) ->
     Res.
+
+number_to_list(N) when is_integer(N) -> integer_to_list(N);
+number_to_list(N) when is_float(N) -> float_to_list(N).

@@ -18,41 +18,70 @@
 -include("vmq_metrics.hrl").
 
 -export([routes/0]).
--export([init/3,
-         handle/2,
-         terminate/3]).
+-export([init/2,
+         content_types_provided/2,
+         reply_to_text/2]).
 
 routes() ->
     [{"/metrics", ?MODULE, []}].
 
-init(_Type, Req, _Opts) ->
-    {ok, Req, undefined}.
+init(Req, Opts) ->
+    {cowboy_rest, Req, Opts}.
 
-handle(Req, State) ->
-    {ContentType, Req2} = cowboy_req:header(<<"content-type">>, Req,
-                                            <<"text/plain">>),
-    {ok, reply(Req2, ContentType), State}.
+content_types_provided(Req, State) ->
+	{[
+		{<<"text/plain">>, reply_to_text}
+    ], Req, State}.
 
-terminate(_Reason, _Req, _State) ->
-    ok.
-
-reply(Req, <<"text/plain">>) ->
+reply_to_text(Req, State) ->
     %% Prometheus output
     Metrics = vmq_metrics:metrics(#{aggregate => false}),
-    Output = prometheus_output(Metrics, []),
-    {ok, Req2} = cowboy_req:reply(200, [{<<"content-type">>, <<"text/plain">>}],
-                                  Output, Req),
-    Req2.
+    Output = prometheus_output(Metrics, {#{}, []}),
+    {Output, Req, State}.
 
-prometheus_output([{#metric_def{type=Type, name=Metric, description=Descr, labels=Labels}, Val}|Metrics], Acc) ->
+prometheus_output([{#metric_def{type=histogram = Type, name=Metric, description=Descr, labels=Labels}, Val}|Metrics],
+                  {EmittedAcc, OutAcc}) ->
+    BinMetric = atom_to_binary(Metric, utf8),
+    Node = atom_to_binary(node(), utf8),
+    {Count, Sum, Buckets} = Val,
+    CountLine = line(<<BinMetric/binary, "_count">>, Node, Labels, integer_to_binary(Count)),
+    SumLine = line(<<BinMetric/binary, "_sum">>, Node, Labels, integer_to_binary(Sum)),
+    Lines =
+    maps:fold(
+      fun(Bucket, BucketVal, BAcc) ->
+              [line(<<BinMetric/binary, "_bucket">>, Node, [{<<"le">>,
+                                       case Bucket of
+                                           infinity -> <<"+Inf">>;
+                                           _ -> integer_to_binary(Bucket)
+                                       end}|Labels], integer_to_binary(BucketVal))
+               |BAcc]
+      end, [CountLine, SumLine], Buckets),
+    case EmittedAcc of
+        #{Metric := _} ->
+            prometheus_output(Metrics, {EmittedAcc, [Lines|OutAcc]});
+        _ ->
+            HelpLine = [<<"# HELP ">>, BinMetric, <<" ", Descr/binary, "\n">>],
+            TypeLine = [<<"# TYPE ">>, BinMetric, type(Type)],
+            prometheus_output(Metrics, {EmittedAcc#{Metric => true}, [[HelpLine, TypeLine, Lines]|OutAcc]})
+    end;
+prometheus_output([{#metric_def{type=Type, name=Metric, description=Descr, labels=Labels}, Val}|Metrics],
+                  {EmittedAcc, OutAcc}) ->
     BinMetric = atom_to_binary(Metric, utf8),
     BinVal = integer_to_binary(Val),
     Node = atom_to_binary(node(), utf8),
-    HelpLine = [<<"# HELP ">>, BinMetric, <<" ", Descr/binary, "\n">>],
-    TypeLine = [<<"# TYPE ">>, BinMetric, type(Type)],
     Line = line(BinMetric, Node, Labels, BinVal),
-    prometheus_output(Metrics, [HelpLine, TypeLine, Line|Acc]);
-prometheus_output([], Acc) -> Acc.
+    case EmittedAcc of
+        #{Metric := _ } ->
+            prometheus_output(Metrics, {EmittedAcc, [Line|OutAcc]});
+        _ ->
+            HelpLine = [<<"# HELP ">>, BinMetric, <<" ", Descr/binary, "\n">>],
+            TypeLine = [<<"# TYPE ">>, BinMetric, type(Type)],
+            prometheus_output(Metrics, {EmittedAcc#{Metric => true}, [[HelpLine, TypeLine, Line]|OutAcc]})
+    end;
+prometheus_output([], {_, OutAcc}) ->
+    %% Make sure the metrics with HELP and TYPE annotations are
+    %% emitted first.
+    lists:reverse(OutAcc).
 
 line(BinMetric, Node, Labels, BinVal) ->
     [BinMetric,
@@ -60,9 +89,11 @@ line(BinMetric, Node, Labels, BinVal) ->
      labels([{<<"node">>, Node}|Labels]),
      <<"} ">>, BinVal, <<"\n">>].
 
-labels([]) -> [];
-labels([{Key,Val}|Rest]) ->
-    join($,, [label(Key,Val)|labels(Rest)]).
+labels(Labels) ->
+    join($,,
+         lists:map(fun({Key, Val}) ->
+                           label(Key, Val)
+                   end, Labels)).
 
 label(Key, Val) ->
     [ensure_bin(Key), <<"=\"">>, ensure_bin(Val), <<"\"">>].
@@ -78,11 +109,12 @@ ensure_bin(E) when is_binary(E) ->
 type(gauge) ->
     <<" gauge\n">>;
 type(counter) ->
-    <<" counter\n">>.
+    <<" counter\n">>;
+type(histogram) ->
+    <<" histogram\n">>.
 
 %% backported to support OTP18. TODO: replace with lists:join/2 when
 %% dropping OTP18.
-join(_Sep, []) -> [];
 join(Sep, [H|T]) -> [H|join_prepend(Sep, T)].
 
 join_prepend(_Sep, []) -> [];

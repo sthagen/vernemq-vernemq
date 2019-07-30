@@ -477,6 +477,8 @@ all_till_ok(HookName, Args) ->
             all_till_ok(Endpoints, HookName, Args)
     end.
 
+-spec all_till_ok(list(any()), atom(), any()) -> ok | {ok, any()} |
+                                                 {error, any()}.
 all_till_ok([{Endpoint,EOpts}|Rest], HookName, Args) ->
     case maybe_call_endpoint(Endpoint, EOpts, HookName, Args) of
         [] -> ok;
@@ -497,8 +499,8 @@ all_till_ok([{Endpoint,EOpts}|Rest], HookName, Args) ->
                 ValidatedModifiers ->
                     {ok, maps:from_list(ValidatedModifiers)}
             end;
-        error ->
-            error;
+        {error, Reason} ->
+            {error, Reason};
         _ ->
             all_till_ok(Rest, HookName, Args)
     end;
@@ -567,13 +569,15 @@ maybe_call_endpoint(Endpoint, EOpts, Hook, Args)
 maybe_call_endpoint(Endpoint, EOpts, Hook, Args) ->
     call_endpoint(Endpoint, EOpts, Hook, Args).
 
-call_endpoint(Endpoint, EOpts, Hook, Args) ->
+call_endpoint(Endpoint, EOpts, Hook, Args0) ->
     Method = post,
     Headers = [{<<"Content-Type">>, <<"application/json">>},
                {<<"vernemq-hook">>, atom_to_binary(Hook, utf8)}],
     Opts = [{pool, Endpoint}],
+    Args1 = filter_args(Args0, Hook, EOpts),
+    Payload = encode_payload(Hook, Args1, EOpts),
     Res =
-        case hackney:request(Method, Endpoint, Headers, encode_payload(Hook, Args, EOpts), Opts) of
+        case hackney:request(Method, Endpoint, Headers, Payload, Opts) of
             {ok, 200, RespHeaders, CRef} ->
                 case hackney:body(CRef) of
                     {ok, Body} ->
@@ -598,10 +602,10 @@ call_endpoint(Endpoint, EOpts, Hook, Args) ->
     case Res of
         {decoded_error, Reason} ->
             lager:debug("calling endpoint received error due to ~p", [Reason]),
-            error;
+            {error, Reason};
         {error, Reason} ->
             lager:error("calling endpoint failed due to ~p", [Reason]),
-            error;
+            {error, Reason};
         Res ->
             Res
     end.
@@ -683,81 +687,6 @@ atomize_keys(Mods) ->
               {K,V}
       end, Mods).
 
-normalize_properties(Mods, Opts) ->
-    case lists:keyfind(properties, 1, Mods) of
-        {_, Props} ->
-            NProps = lists:foldl(
-                       fun({K,V}, Acc) ->
-                               [normalize_property(K,V,Opts)|Acc]
-                       end, [], Props),
-            lists:keyreplace(properties, 1, Mods, {properties, maps:from_list(NProps)});
-        false ->
-            Mods
-    end.
-
-normalize_property(<<"payload_format_indicator">>, Val, _Opts) ->
-    NVal = try
-               binary_to_existing_atom(Val, utf8)
-           catch
-               error:badarg ->
-                   Val
-           end,
-    {?P_PAYLOAD_FORMAT_INDICATOR, NVal};
-normalize_property(<<"message_expiry_interval">>, Val, _Opts) ->
-    {?P_MESSAGE_EXPIRY_INTERVAL, Val};
-normalize_property(<<"content_type">>, Val, _Opts) ->
-    {?P_CONTENT_TYPE, Val};
-normalize_property(<<"response_topic">>, Val, _Opts) ->
-    {?P_RESPONSE_TOPIC, Val};
-normalize_property(<<"correlaton_data">>, Val, _Opts) ->
-    {?P_CORRELATION_DATA, base64:decode(Val)};
-normalize_property(<<"subscription_id">>, Vals, _Opts) ->
-    {?P_SUBSCRIPTION_ID, Vals};
-normalize_property(<<"session_expiry_interval">>, Val, _Opts) ->
-    {?P_SESSION_EXPIRY_INTERVAL, Val};
-normalize_property(<<"assigned_client_id">>, Val, _Opts) ->
-    {?P_ASSIGNED_CLIENT_ID, Val};
-normalize_property(<<"server_keep_alive">>, Val, _Opts) ->
-    {?P_SERVER_KEEP_ALIVE, Val};
-normalize_property(<<"authentication_method">>, Val, _Opts) ->
-    {?P_AUTHENTICATION_METHOD, Val};
-normalize_property(<<"authentication_data">>, Val, _Opts) ->
-    {?P_AUTHENTICATION_DATA, base64:decode(Val)};
-normalize_property(<<"request_problem_info">>, Val, _Opts) ->
-    {?P_REQUEST_PROBLEM_INFO, Val};
-normalize_property(<<"will_delay_interval">>, Val, _Opts) ->
-    {?P_WILL_DELAY_INTERVAL, Val};
-normalize_property(<<"request_response_info">>, Val, _Opts) ->
-    {?P_REQUEST_RESPONSE_INFO, Val};
-normalize_property(<<"response_info">>, Val, _Opts) ->
-    {?P_RESPONSE_INFO, Val};
-normalize_property(<<"server_reference">>, Val, _Opts) ->
-    {?P_SERVER_REF, Val};
-normalize_property(<<"reason_string">>, Val, _Opts) ->
-    {?P_REASON_STRING, Val};
-normalize_property(<<"receive_max">>, Val, _Opts) ->
-    {?P_RECEIVE_MAX, Val};
-normalize_property(<<"topic_alias_maximum">>, Val, _Opts) ->
-    {?P_TOPIC_ALIAS_MAX, Val};
-normalize_property(<<"topic_alias">>, Val, _Opts) ->
-    {?P_TOPIC_ALIAS, Val};
-normalize_property(<<"max_qos">>, Val, _Opts) ->
-    {?P_MAX_QOS, Val};
-normalize_property(<<"retain_available">>, Val, _Opts) ->
-    {?P_RETAIN_AVAILABLE, Val};
-normalize_property(<<"user_property">>, Values, _Opts) ->
-    NValues = [{K,V} || [{_,K},{_,V}] <- Values],
-    {?P_USER_PROPERTY, NValues};
-normalize_property(<<"max_packet_size">>, Val, _Opts) ->
-    {?P_MAX_PACKET_SIZE, Val};
-normalize_property(<<"wildcard_subscriptions_available">>, Val, _Opts) ->
-    {?P_WILDCARD_SUBS_AVAILABLE, Val};
-normalize_property(<<"subscription_identifiers_available">>, Val, _Opts) ->
-    {?P_SUB_IDS_AVAILABLE, Val};
-normalize_property(<<"shared_subscriptions_available">>, Val, _Opts) ->
-    {?P_SHARED_SUBS_AVAILABLE, Val}.
-
-
 normalize_modifiers(Hook, Mods, Opts)
   when Hook =:= auth_on_register_m5;
        Hook =:= auth_on_unsubscribe_m5;
@@ -780,8 +709,8 @@ normalize_modifiers(auth_on_register, Mods, _) ->
 normalize_modifiers(auth_on_subscribe, Topics, _) ->
     lists:map(
       fun(PL) ->
-              [proplists:get_value(<<"topic">>, PL),
-               proplists:get_value(<<"qos">>, PL)]
+              {proplists:get_value(<<"topic">>, PL),
+               proplists:get_value(<<"qos">>, PL)}
       end,
       Topics);
 normalize_modifiers(auth_on_publish, Mods, EOpts) ->
@@ -790,6 +719,33 @@ normalize_modifiers(on_deliver, Mods, EOpts) ->
     norm_payload(atomize_keys(Mods), EOpts);
 normalize_modifiers(on_unsubscribe, Mods, _) ->
     Mods.
+
+normalize_properties(Modifiers, Opts) ->
+    case lists:keyfind(properties, 1, Modifiers) of
+        false ->
+            Modifiers;
+        {_, Props} ->
+            NewProps =
+                maps:from_list(lists:map(
+                                 fun({K,V}) ->
+                                         normalize_property(binary_to_existing_atom(K,utf8), V, Opts)
+                                 end, Props)),
+            lists:keyreplace(properties, 1, Modifiers, {properties, NewProps})
+    end.
+
+normalize_property(?P_PAYLOAD_FORMAT_INDICATOR, Val, _Opts) ->
+    {?P_PAYLOAD_FORMAT_INDICATOR, binary_to_existing_atom(Val,utf8)};
+normalize_property(?P_RESPONSE_TOPIC, Val, _Opts) ->
+    {?P_RESPONSE_TOPIC, Val};
+normalize_property(?P_USER_PROPERTY, Values, Opts) ->
+    NValues = [{maybe_b64decode(K, Opts),
+                maybe_b64decode(V, Opts)} || [{_,K},{_,V}] <- Values],
+    {?P_USER_PROPERTY, NValues};
+normalize_property(?P_AUTHENTICATION_DATA, Val, _Opts) ->
+    {?P_AUTHENTICATION_DATA, base64:decode(Val)};
+normalize_property(K,V, _Opts) ->
+    %% let through unmodified.
+    {K,V}.
 
 normalize_sub_topics(Mods, _Opts) ->
     lists:map(
@@ -806,6 +762,13 @@ norm_payload(Mods, EOpts) ->
               {payload, b64decode(Payload, EOpts)};
          (E) -> E
       end, Mods).
+
+filter_args(Args, Hook, #{no_payload := true})
+            when Hook =:= auth_on_publish;
+                 Hook =:= auth_on_publish_m5 ->
+    lists:keydelete(payload, 1, Args);
+filter_args(Args, _, _) ->
+    Args.
 
 encode_payload(Hook, Args, Opts)
   when Hook =:= auth_on_subscribe_m5;
@@ -864,21 +827,29 @@ encode_props(Props, Opts) when is_map(Props) ->
                       maps:put(K1,V1, Acc)
               end, #{}, Props).
 
-encode_property(p_user_property, Values, Opts) ->
+encode_property(?P_PAYLOAD_FORMAT_INDICATOR, Val, _Opts) ->
+    {?P_PAYLOAD_FORMAT_INDICATOR, erlang:atom_to_binary(Val, utf8)};
+encode_property(?P_RESPONSE_TOPIC, Val, _Opts) ->
+    {?P_RESPONSE_TOPIC, enc_topic(Val)};
+encode_property(?P_USER_PROPERTY, Values, Opts) ->
     Values1 = lists:map(
       fun({K,V}) ->
               #{<<"key">> => maybe_b64encode(K, Opts),
                 <<"val">> => maybe_b64encode(V, Opts)}
       end, Values),
-    {user_property, Values1};
+    {?P_USER_PROPERTY, Values1};
 encode_property(?P_AUTHENTICATION_DATA, Val, _Opts) ->
-    {authentication_data, base64:encode(Val)};
-encode_property(?P_AUTHENTICATION_METHOD, Val, _Opts) ->
-    {authentication_method, Val}.
+    {?P_AUTHENTICATION_DATA, base64:encode(Val)};
+encode_property(Prop, Val, _) ->
+    %% fall-through for properties that need no special handling.
+    {Prop, Val}.
 
 
 maybe_b64encode(V, #{base64 := false}) -> V;
 maybe_b64encode(V, _) -> base64:encode(V).
+
+maybe_b64decode(V, #{base64 := false}) -> V;
+maybe_b64decode(V, _) -> base64:decode(V).
 
 b64encode(V, #{base64_payload := false}) -> V;
 b64encode(V, _) -> base64:encode(V).
@@ -890,6 +861,9 @@ from_internal_qos(not_allowed) ->
     128;
 from_internal_qos(V) when is_integer(V) ->
     V.
+
+enc_topic(Topic) when is_list(Topic) ->
+    iolist_to_binary(Topic).
 
 -ifdef(TEST).
 parse_max_age_test() ->

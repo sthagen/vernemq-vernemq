@@ -162,15 +162,14 @@ setup_queue(SubscriberId, Subs, Acc) ->
 
 handle_event(Handler, Event) ->
     case Handler(Event) of
-        {delete, _, _} ->
+        {delete, _SubscriberId, _} ->
             %% TODO: we might consider a queue cleanup here.
             ignore;
         {update, _SubscriberId, [], []} ->
             %% noop
             ignore;
-        {update, SubscriberId, _, _} ->
-            Subs = vmq_reg:subscriptions_for_subscriber_id(SubscriberId),
-            handle_new_sub_event(SubscriberId, Subs);
+        {update, SubscriberId, _OldSubs, NewSubs} ->
+            handle_new_sub_event(SubscriberId, NewSubs);
         ignore ->
             ignore
     end.
@@ -179,8 +178,9 @@ handle_new_sub_event(SubscriberId, Subs) ->
     Sessions = vmq_subscriber:get_sessions(Subs),
     case lists:keymember(node(), 1, Sessions) of
         true ->
-            %% we have to ensure that we have a local queue for this subscriber
-            vmq_queue_sup_sup:start_queue(SubscriberId);
+            %% The local queue will have been started directly via
+            %% `vmq_reg:register_subscriber` in the fsm.
+            ignore;
         false ->
             %% we may migrate an existing queue to a remote queue
             %% Do we have a local queue to migrate?

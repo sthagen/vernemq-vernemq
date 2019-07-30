@@ -4,7 +4,7 @@
 -compile(nowarn_export_all).
 
 -include_lib("common_test/include/ct.hrl").
--include_lib("vmq_commons/include/vmq_types_mqtt5.hrl").
+-include_lib("vmq_commons/include/vmq_types.hrl").
 -include_lib("vernemq_dev/include/vernemq_dev.hrl").
 
 init_per_suite(Config) ->
@@ -224,8 +224,8 @@ enhanced_auth_method_not_supported(_Config) ->
     ClientId = "client-enh-auth-bad-auth",
     Connect = packetv5:gen_connect(ClientId, [{keepalive, 10},
                                               {properties, auth_props(?AUTH_METHOD,<<"Client1">>)}]),
-    Disconnect = packetv5:gen_disconnect(?M5_BAD_AUTHENTICATION_METHOD, #{}),
-    {ok, Socket} = packetv5:do_client_connect(Connect, Disconnect, []),
+    Connack = packetv5:gen_connack(0, ?M5_BAD_AUTHENTICATION_METHOD, #{}),
+    {ok, Socket} = packetv5:do_client_connect(Connect, Connack, []),
     {error, closed} = gen_tcp:recv(Socket, 0,100),
 
     ok = vmq_plugin_mgr:disable_module_plugin(
@@ -340,20 +340,22 @@ on_auth_bad_method_hook(_, _, #{p_authentication_method := _, p_authentication_d
 
 on_auth_hook(_, _, #{p_authentication_method := ?AUTH_METHOD, p_authentication_data := <<"Client1">>}) ->
     {ok, #{reason_code => ?CONTINUE_AUTHENTICATION,
-           properties =>
-               #{p_authentication_method => ?AUTH_METHOD, p_authentication_data => <<"Server1">>}}};
+           properties => #{?P_AUTHENTICATION_METHOD => ?AUTH_METHOD,
+                           ?P_AUTHENTICATION_DATA =><<"Server1">>}}};
 on_auth_hook(_, _, #{p_authentication_method := ?AUTH_METHOD, p_authentication_data := <<"Client2">>}) ->
     {ok, #{reason_code => ?CONTINUE_AUTHENTICATION,
-           properties =>
-               #{p_authentication_method => ?AUTH_METHOD, p_authentication_data => <<"Server2">>}}};
+           properties => #{?P_AUTHENTICATION_METHOD => ?AUTH_METHOD,
+                           ?P_AUTHENTICATION_DATA =><<"Server2">>}}};
 on_auth_hook(_, _, #{p_authentication_method := ?AUTH_METHOD, p_authentication_data := <<"Client3">>}) ->
     %% return ok which will trigger the connack being sent to the
     %% client *or* an AUTH ok
     {ok, #{reason_code => ?SUCCESS,
-           properties => #{p_authentication_method => ?AUTH_METHOD, p_authentication_data => <<"ServerFinal">>}}};
+           properties => #{?P_AUTHENTICATION_METHOD => ?AUTH_METHOD,
+                           ?P_AUTHENTICATION_DATA =><<"ServerFinal">>}}};
 on_auth_hook(_, _, #{p_authentication_method := ?AUTH_METHOD, p_authentication_data := <<"Reauth">>}) ->
     {ok, #{reason_code => ?SUCCESS,
-           properties => #{p_authentication_method => ?AUTH_METHOD, p_authentication_data => <<"ReauthOK">>}}}.
+           properties => #{?P_AUTHENTICATION_METHOD => ?AUTH_METHOD,
+                           ?P_AUTHENTICATION_DATA =><<"ReauthOK">>}}}.
 
 auth_on_publish_after_reauth(undefined, _, 1, [<<"some">>, <<"topic">>], <<"some payload">>, false, _) ->
     ok.

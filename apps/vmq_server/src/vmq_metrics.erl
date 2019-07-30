@@ -24,6 +24,7 @@
 
          incr_socket_open/0,
          incr_socket_close/0,
+         incr_socket_close_timeout/0,
          incr_socket_error/0,
          incr_bytes_received/1,
          incr_bytes_sent/1,
@@ -61,6 +62,7 @@
          incr_mqtt_error_unsubscribe/0,
 
          incr_queue_setup/0,
+         incr_queue_initialized_from_storage/0,
          incr_queue_teardown/0,
          incr_queue_drop/0,
          incr_queue_msg_expired/1,
@@ -69,11 +71,12 @@
          incr_queue_in/1,
          incr_queue_out/1,
 
-         incr_client_expired/0,
-
          incr_cluster_bytes_sent/1,
          incr_cluster_bytes_received/1,
-         incr_cluster_bytes_dropped/1
+         incr_cluster_bytes_dropped/1,
+
+         incr_router_matches_local/1,
+         incr_router_matches_remote/1
         ]).
 
 -export([metrics/0,
@@ -107,139 +110,146 @@
 
 %%% Socket Totals
 incr_socket_open() ->
-    incr_item('socket_open', 1).
+    incr_item(?METRIC_SOCKET_OPEN, 1).
 
 incr_socket_close() ->
-    incr_item('socket_close', 1).
+    incr_item(?METRIC_SOCKET_CLOSE, 1).
+
+incr_socket_close_timeout() ->
+    incr_item(?METRIC_SOCKET_CLOSE_TIMEOUT, 1).
 
 incr_socket_error() ->
-    incr_item('socket_error', 1).
+    incr_item(?METRIC_SOCKET_ERROR, 1).
 
 incr_bytes_received(V) ->
-    incr_item('bytes_received', V).
+    incr_item(?METRIC_BYTES_RECEIVED, V).
 
 incr_bytes_sent(V) ->
-    incr_item('bytes_sent', V).
-
+    incr_item(?METRIC_BYTES_SENT, V).
 
 incr_mqtt_connect_received() ->
-    incr_item(mqtt_connect_received, 1).
+    incr_item(?MQTT4_CONNECT_RECEIVED, 1).
 
 incr_mqtt_publish_received() ->
-    incr_item(mqtt_publish_received, 1).
+    incr_item(?MQTT4_PUBLISH_RECEIVED, 1).
 
 incr_mqtt_puback_received() ->
-    incr_item(mqtt_puback_received, 1).
+    incr_item(?MQTT4_PUBACK_RECEIVED, 1).
 
 incr_mqtt_pubrec_received() ->
-    incr_item(mqtt_pubrec_received, 1).
+    incr_item(?MQTT4_PUBREC_RECEIVED, 1).
 
 incr_mqtt_pubrel_received() ->
-    incr_item(mqtt_pubrel_received, 1).
+    incr_item(?MQTT4_PUBREL_RECEIVED, 1).
 
 incr_mqtt_pubcomp_received() ->
-    incr_item(mqtt_pubcomp_received, 1).
+    incr_item(?MQTT4_PUBCOMP_RECEIVED, 1).
 
 incr_mqtt_subscribe_received() ->
-    incr_item(mqtt_subscribe_received, 1).
+    incr_item(?MQTT4_SUBSCRIBE_RECEIVED, 1).
 
 incr_mqtt_unsubscribe_received() ->
-    incr_item(mqtt_unsubscribe_received, 1).
+    incr_item(?MQTT4_UNSUBSCRIBE_RECEIVED, 1).
 
 incr_mqtt_pingreq_received() ->
-    incr_item(mqtt_pingreq_received, 1).
+    incr_item(?MQTT4_PINGREQ_RECEIVED, 1).
 
 incr_mqtt_disconnect_received() ->
-    incr_item(mqtt_disconnect_received, 1).
+    incr_item(?MQTT4_DISCONNECT_RECEIVED, 1).
 
 incr_mqtt_publish_sent() ->
-    incr_item(mqtt_publish_sent, 1).
+    incr_item(?MQTT4_PUBLISH_SENT, 1).
 incr_mqtt_publishes_sent(N) ->
-    incr_item(mqtt_publish_sent, N).
+    incr_item(?MQTT4_PUBLISH_SENT, N).
 
 incr_mqtt_puback_sent() ->
-    incr_item(mqtt_puback_sent, 1).
+    incr_item(?MQTT4_PUBACK_SENT, 1).
 
 incr_mqtt_pubrec_sent() ->
-    incr_item(mqtt_pubrec_sent, 1).
+    incr_item(?MQTT4_PUBREC_SENT, 1).
 
 incr_mqtt_pubrel_sent() ->
-    incr_item(mqtt_pubrel_sent, 1).
+    incr_item(?MQTT4_PUBREL_SENT, 1).
 
 incr_mqtt_pubcomp_sent() ->
-    incr_item(mqtt_pubcomp_sent, 1).
+    incr_item(?MQTT4_PUBCOMP_SENT, 1).
 
 incr_mqtt_suback_sent() ->
-    incr_item(mqtt_suback_sent, 1).
+    incr_item(?MQTT4_SUBACK_SENT, 1).
 
 incr_mqtt_unsuback_sent() ->
-    incr_item(mqtt_unsuback_sent, 1).
+    incr_item(?MQTT4_UNSUBACK_SENT, 1).
 
 incr_mqtt_pingresp_sent() ->
-    incr_item(mqtt_pingresp_sent, 1).
+    incr_item(?MQTT4_PINGRESP_SENT, 1).
 
 incr_mqtt_error_auth_publish() ->
-    incr_item(mqtt_publish_auth_error, 1).
+    incr_item(?MQTT4_PUBLISH_AUTH_ERROR, 1).
 
 incr_mqtt_error_auth_subscribe() ->
-    incr_item(mqtt_subscribe_auth_error, 1).
+    incr_item(?MQTT4_SUBSCRIBE_AUTH_ERROR, 1).
 
 incr_mqtt_error_invalid_msg_size() ->
-    incr_item(mqtt_invalid_msg_size_error, 1).
+    incr_item(?MQTT4_INVALID_MSG_SIZE_ERROR, 1).
 
 incr_mqtt_error_invalid_puback() ->
-    incr_item(mqtt_puback_invalid_error, 1).
+    incr_item(?MQTT4_PUBACK_INVALID_ERROR, 1).
 
 incr_mqtt_error_invalid_pubrec() ->
-    incr_item(mqtt_pubrec_invalid_error, 1).
+    incr_item(?MQTT4_PUBREC_INVALID_ERROR, 1).
 
 incr_mqtt_error_invalid_pubcomp() ->
-    incr_item(mqtt_pubcomp_invalid_error, 1).
+    incr_item(?MQTT4_PUBCOMP_INVALID_ERROR, 1).
 
 incr_mqtt_error_publish() ->
-    incr_item(mqtt_publish_error, 1).
+    incr_item(?MQTT4_PUBLISH_ERROR, 1).
 
 incr_mqtt_error_subscribe() ->
-    incr_item(mqtt_subscribe_error, 1).
+    incr_item(?MQTT4_SUBSCRIBE_ERROR, 1).
 
 incr_mqtt_error_unsubscribe() ->
-    incr_item(mqtt_unsubscribe_error, 1).
+    incr_item(?MQTT4_UNSUBSCRIBE_ERROR, 1).
 
 incr_queue_setup() ->
-    incr_item(queue_setup, 1).
+    incr_item(?METRIC_QUEUE_SETUP, 1).
+
+incr_queue_initialized_from_storage() ->
+    incr_item(?METRIC_QUEUE_INITIALIZED_FROM_STORAGE, 1).
 
 incr_queue_teardown() ->
-    incr_item(queue_teardown, 1).
+    incr_item(?METRIC_QUEUE_TEARDOWN, 1).
 
 incr_queue_drop() ->
-    incr_item(queue_message_drop, 1).
+    incr_item(?METRIC_QUEUE_MESSAGE_DROP, 1).
 
 incr_queue_msg_expired(N) ->
-    incr_item(queue_message_expired, N).
+    incr_item(?METRIC_QUEUE_MESSAGE_EXPIRED, N).
 
 incr_queue_unhandled(N) ->
-    incr_item(queue_message_unhandled, N).
+    incr_item(?METRIC_QUEUE_MESSAGE_UNHANDLED, N).
 
 incr_queue_in() ->
-    incr_item(queue_message_in, 1).
+    incr_item(?METRIC_QUEUE_MESSAGE_IN, 1).
 incr_queue_in(N) ->
-    incr_item(queue_message_in, N).
+    incr_item(?METRIC_QUEUE_MESSAGE_IN, N).
 
 incr_queue_out(N) ->
-    incr_item(queue_message_out, N).
-
-incr_client_expired() ->
-    incr_item(client_expired, 1).
-
+    incr_item(?METRIC_QUEUE_MESSAGE_OUT, N).
 
 incr_cluster_bytes_received(V) ->
-    incr_item('cluster_bytes_received', V).
+    incr_item(?METRIC_CLUSTER_BYTES_RECEIVED, V).
 
 incr_cluster_bytes_sent(V) ->
-    incr_item('cluster_bytes_sent', V).
+    incr_item(?METRIC_CLUSTER_BYTES_SENT, V).
 
 incr_cluster_bytes_dropped(V) ->
-    incr_item('cluster_bytes_dropped', V).
+    incr_item(?METRIC_CLUSTER_BYTES_DROPPED, V).
+
+incr_router_matches_local(V) ->
+    incr_item(?METRIC_ROUTER_MATCHES_LOCAL, V).
+
+incr_router_matches_remote(V) ->
+    incr_item(?METRIC_ROUTER_MATCHES_REMOTE, V).
 
 incr(Entry) ->
     incr_item(Entry, 1).
@@ -249,46 +259,25 @@ incr(Entry, N) ->
 
 incr_item(_, 0) -> ok; %% don't do the update
 incr_item(Entry, Val) when Val > 0->
-    case get(Entry) of
-        undefined ->
-            try ets:lookup(?MODULE, Entry) of
-               [{_, CntRef}] ->
-                    put(Entry, CntRef),
-                    incr_item(Entry, Val);
-                [] ->
-                    lager:error("invalid counter ~p", [Entry])
-            catch
-               _:_ ->
-                    %% we don't want to crash a session/queue
-                    %% due to an unavailable counter
-                    ok
-            end;
-        CntRef when Val == 1 ->
-            mzmetrics:incr_resource_counter(CntRef, 0);
-        CntRef ->
-            mzmetrics:update_resource_counter(CntRef, 0, Val)
-    end.
+    ARef = case get(atomics_ref) of
+               undefined ->
+                   Ref = persistent_term:get(?MODULE),
+                   put(atomics_ref, Ref),
+                   Ref;
+               Ref ->
+                   Ref
+           end,
+    atomics:add(ARef, met2idx(Entry), Val).
 
 %% true means current rate is ok.
 check_rate(_, 0) -> true; % 0 means unlimited
 check_rate(RateEntry, MaxRate) ->
-    case get(RateEntry) of
-        undefined ->
-            try ets:lookup(?MODULE, RateEntry) of
-                [{_, CntRef}] ->
-                    put(RateEntry, CntRef),
-                    check_rate(RateEntry, MaxRate)
-            catch
-                _:_ ->
-                    true
-            end;
-        CntRef ->
-            mzmetrics:get_resource_counter(CntRef, 0) < MaxRate
-    end.
+    ARef = persistent_term:get(?MODULE),
+    atomics:get(ARef, met2idx(RateEntry)) < MaxRate.
 
 counter_val(Entry) ->
-    [{_, CntRef}] = ets:lookup(?MODULE, Entry),
-    mzmetrics:get_resource_counter(CntRef, 0).
+    ARef = persistent_term:get(?MODULE),
+    atomics:get(ARef, met2idx(Entry)).
 
 reset_counters() ->
     lists:foreach(
@@ -297,8 +286,8 @@ reset_counters() ->
       end, internal_defs()).
 
 reset_counter(Entry) ->
-    [{_, CntRef}] = ets:lookup(?MODULE, Entry),
-    mzmetrics:reset_resource_counter(CntRef, 0).
+    ARef = persistent_term:get(?MODULE),
+    atomics:put(ARef, met2idx(Entry), 0).
 
 reset_counter(Entry, InitVal) ->
     reset_counter(Entry),
@@ -322,8 +311,10 @@ metrics() ->
 metrics(Opts) ->
     WantLabels = maps:get(labels, Opts, []),
 
-    MetricDefs = metric_defs(),
-    MetricValues = metric_values(),
+    {PluggableMetricDefs, PluggableMetricValues} = pluggable_metrics(),
+
+    MetricDefs = metric_defs() ++ PluggableMetricDefs,
+    MetricValues = metric_values() ++ PluggableMetricValues,
 
     %% Create id->metric def map
     IdDef = lists:foldl(
@@ -359,6 +350,31 @@ metrics(Opts) ->
             Metrics
     end.
 
+pluggable_metric_defs() ->
+    {Defs, _} = pluggable_metrics(),
+    Defs.
+
+pluggable_metrics() ->
+    lists:foldl(
+      fun({App, _Name, _Version}, Acc) ->
+              case application:get_env(App, vmq_metrics_mfa, undefined) of
+                  undefined -> Acc;
+                  {Mod, Fun, Args}
+                    when is_atom(Mod) and is_atom(Fun) and is_list(Args) ->
+                      try
+                          Metrics = apply(Mod, Fun, Args),
+                          lists:foldl(
+                            fun({Type, Labels, UniqueId, Name, Description, Value}, {DefsAcc, ValsAcc}) ->
+                                    {[m(Type, Labels, UniqueId, Name, Description) | DefsAcc],
+                                     [{UniqueId, Value} | ValsAcc]}
+                            end, Acc, Metrics)
+                      catch
+                          _:_ ->
+                              Acc
+                      end
+              end
+      end, {[], []}, application:which_applications()).
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the server
@@ -391,7 +407,7 @@ get_label_info() ->
                                 maps:put(LabelName, [Val], AccAcc)
                         end
                 end, Acc0, Labels)
-      end, #{}, metric_defs()),
+      end, #{}, metric_defs() ++ pluggable_metric_defs()),
     maps:to_list(LabelInfo).
 
 %%%===================================================================
@@ -411,15 +427,30 @@ get_label_info() ->
 %%--------------------------------------------------------------------
 init([]) ->
     timer:send_interval(1000, calc_rates),
-    ets:new(?MODULE, [public, named_table, {read_concurrency, true}]),
     {RateEntries, _} = lists:unzip(rate_entries()),
-    lists:foreach(
-      fun(Entry) ->
-              Str = lists:flatten(io_lib:format("~p", [Entry])),
-              Ref = mzmetrics:alloc_resource(0, Str, 8),
-              ets:insert(?MODULE, {Entry, Ref})
-      end, RateEntries ++
-          [Id || #metric_def{id = Id} <- internal_defs()]),
+    AllEntries = RateEntries ++
+          [Id || #metric_def{id = Id} <- internal_defs()],
+    NumEntries = length(AllEntries),
+
+    %% Sanity check where it is checked that there is a one-to-one
+    %% mapping between atomics indexes and metrics identifiers by 1)
+    %% checking that all metric identifiers have an atomics index and
+    %% 2) that there are as many indexes as there are metrics and 3)
+    %% that there are no index duplicates.
+    Idxs = lists:map(fun(Id) -> met2idx(Id) end, AllEntries),
+    NumEntries = length(lists:sort(Idxs)),
+    NumEntries = length(lists:usort(Idxs)),
+
+    %% only alloc a new atomics array if one doesn't already exist!
+    case catch persistent_term:get(?MODULE) of
+        {'EXIT', {badarg,_}} ->
+            %% allocate twice the number of entries to make it possible to add
+            %% new metrics during a hot code upgrade.
+            ARef = atomics:new(2*NumEntries, [{signed, false}]),
+            persistent_term:put(?MODULE, ARef);
+        _ExistingRef ->
+            ok
+    end,
     MetricsInfo = register_metrics(#{}),
     {ok, #state{info=MetricsInfo}}.
 
@@ -481,7 +512,7 @@ handle_info(calc_rates, State) ->
             %% but intermediate counter resets or counter overflows
             %% could occur
             lists:foreach(
-              fun({RateEntry, Entry}) -> calc_rate_per_conn(RateEntry, Entry, V) end,
+              fun({RateEntry, Entries}) -> calc_rate_per_conn(RateEntry, Entries, V) end,
               rate_entries());
         _ ->
             lager:warning("can't calculate message rates", [])
@@ -516,10 +547,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%===================================================================
 %%% Internal functions
 %%%===================================================================
-calc_rate_per_conn(REntry, _Entry, 0) ->
+calc_rate_per_conn(REntry, _Entries, 0) ->
     reset_counter(REntry);
-calc_rate_per_conn(REntry, Entry, N) ->
-    case counter_val_since_last_call(Entry) of
+calc_rate_per_conn(REntry, Entries, N) ->
+    Val = lists:sum(
+            [counter_val_since_last_call(Entry) || Entry <- Entries]),
+    case Val of
         Val when Val >= 0 ->
             reset_counter(REntry, Val div N);
         _ ->
@@ -560,7 +593,7 @@ register_metrics(Metrics) ->
               Acc0
       end,
       Metrics,
-      metric_defs()).
+      metric_defs()). % no need to register pluggable_metric_defs
 
 has_label([], _) ->
     true;
@@ -596,7 +629,8 @@ metric_values() ->
 
 internal_defs() ->
     flatten([counter_entries_def(), mqtt4_connack_sent_def(),
-             mqtt5_disconnect_def(), mqtt5_connack_sent_def(),
+             mqtt5_disconnect_recv_def(), mqtt5_disconnect_sent_def(),
+             mqtt5_connack_sent_def(),
              mqtt5_puback_sent_def(), mqtt5_puback_received_def(),
              mqtt5_pubrec_sent_def(), mqtt5_pubrec_received_def(),
              mqtt5_pubrel_sent_def(), mqtt5_pubrel_received_def(),
@@ -608,6 +642,7 @@ counter_entries_def() ->
     [
      m(counter, [], socket_open, socket_open, <<"The number of times an MQTT socket has been opened.">>),
      m(counter, [], socket_close, socket_close, <<"The number of times an MQTT socket has been closed.">>),
+     m(counter, [], socket_close_timeout, socket_close_timeout, <<"The number of times VerneMQ closed an MQTT socket due to no CONNECT frame has been received on time.">>),
      m(counter, [], socket_error, socket_error, <<"The total number of socket errors that have occurred.">>),
      m(counter, [], bytes_received, bytes_received, <<"The total number of bytes received.">>),
      m(counter, [], bytes_sent, bytes_sent, <<"The total number of bytes sent.">>),
@@ -645,25 +680,18 @@ counter_entries_def() ->
      m(counter, [{mqtt_version,"4"}], mqtt_publish_error, mqtt_publish_error, <<"The number of times a PUBLISH operation failed due to a netsplit.">>),
      m(counter, [{mqtt_version,"4"}], mqtt_subscribe_error, mqtt_subscribe_error, <<"The number of times a SUBSCRIBE operation failed due to a netsplit.">>),
      m(counter, [{mqtt_version,"4"}], mqtt_unsubscribe_error, mqtt_unsubscribe_error, <<"The number of times an UNSUBSCRIBE operation failed due to a netsplit.">>),
+     m(counter, [{mqtt_version,"4"}], ?MQTT4_CLIENT_KEEPALIVE_EXPIRED, client_keepalive_expired, <<"The number of clients which failed to communicate within the keepalive time period.">>),
 
      m(counter, [{mqtt_version,"5"}], ?MQTT5_CONNECT_RECEIVED, mqtt_connect_received, <<"The number of CONNECT packets received.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_INVALID_MSG_SIZE_ERROR, mqtt_invalid_msg_size_error, <<"The number of packages exceeding the maximum allowed size.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_PINGREQ_RECEIVED, mqtt_pingreq_received, <<"The number of PINGREQ packets received.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_PINGRESP_SENT, mqtt_pingresp_sent, <<"The number of PINGRESP packets sent.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBACK_INVALID_ERROR, mqtt_puback_invalid_error, <<"The number of unexpected PUBACK messages received.">>),
-     m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBACK_RECEIVED, mqtt_puback_received, <<"The number of PUBACK packets received.">>),
-     m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBACK_SENT, mqtt_puback_sent, <<"The number of PUBACK packets sent.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBCOMP_INVALID_ERROR, mqtt_pubcomp_invalid_error, <<"The number of unexpected PUBCOMP messages received.">>),
-     m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBCOMP_RECEIVED, mqtt_pubcomp_received, <<"The number of PUBCOMP packets received.">>),
-     m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBCOMP_SENT, mqtt_pubcomp_sent, <<"The number of PUBCOMP packets sent.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBLISH_AUTH_ERROR, mqtt_publish_auth_error, <<"The number of unauthorized publish attempts.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBLISH_ERROR, mqtt_publish_error, <<"The number of times a PUBLISH operation failed due to a netsplit.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBLISH_RECEIVED, mqtt_publish_received, <<"The number of PUBLISH packets received.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBLISH_SENT, mqtt_publish_sent, <<"The number of PUBLISH packets sent.">>),
-     m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBREC_RECEIVED, mqtt_pubrec_received, <<"The number of PUBREC packets received.">>),
-     m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBREC_SENT, mqtt_pubrec_sent, <<"The number of PUBREC packets sent.">>),
-     m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBREL_RECEIVED, mqtt_pubrel_received, <<"The number of PUBREL packets received.">>),
-     m(counter, [{mqtt_version,"5"}], ?MQTT5_PUBREL_SENT, mqtt_pubrel_sent, <<"The number of PUBREL packets sent.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_SUBACK_SENT, mqtt_suback_sent, <<"The number of SUBACK packets sent.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_SUBSCRIBE_AUTH_ERROR, mqtt_subscribe_auth_error, <<"The number of unauthorized subscription attempts.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_SUBSCRIBE_ERROR, mqtt_subscribe_error, <<"The number of times a SUBSCRIBE operation failed due to a netsplit.">>),
@@ -671,8 +699,10 @@ counter_entries_def() ->
      m(counter, [{mqtt_version,"5"}], ?MQTT5_UNSUBACK_SENT, mqtt_unsuback_sent, <<"The number of UNSUBACK packets sent.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_UNSUBSCRIBE_ERROR, mqtt_unsubscribe_error, <<"The number of times an UNSUBSCRIBE operation failed due to a netsplit.">>),
      m(counter, [{mqtt_version,"5"}], ?MQTT5_UNSUBSCRIBE_RECEIVED, mqtt_unsubscribe_received, <<"The number of UNSUBSCRIBE packets received.">>),
+     m(counter, [{mqtt_version,"5"}], ?MQTT5_CLIENT_KEEPALIVE_EXPIRED, client_keepalive_expired, <<"The number of clients which failed to communicate within the keepalive time period.">>),
 
      m(counter, [], queue_setup, queue_setup, <<"The number of times a MQTT queue process has been started.">>),
+     m(counter, [], queue_initialized_from_storage, queue_initialized_from_storage, <<"The number of times a MQTT queue process has been initialized from offline storage.">>),
      m(counter, [], queue_teardown, queue_teardown, <<"The number of times a MQTT queue process has been terminated.">>),
      m(counter, [], queue_message_drop, queue_message_drop, <<"The number of messages dropped due to full queues.">>),
      m(counter, [], queue_message_expired, queue_message_expired, <<"The number of messages which expired before delivery.">>),
@@ -682,7 +712,9 @@ counter_entries_def() ->
      m(counter, [], client_expired, client_expired, <<"Not in use (deprecated)">>),
      m(counter, [], cluster_bytes_received, cluster_bytes_received, <<"The number of bytes received from other cluster nodes.">>),
      m(counter, [], cluster_bytes_sent, cluster_bytes_sent, <<"The number of bytes send to other cluster nodes.">>),
-     m(counter, [], cluster_bytes_dropped, cluster_bytes_dropped, <<"The number of bytes dropped while sending data to other cluster nodes.">>)
+     m(counter, [], cluster_bytes_dropped, cluster_bytes_dropped, <<"The number of bytes dropped while sending data to other cluster nodes.">>),
+     m(counter, [], router_matches_local, router_matches_local, <<"The number of matched local subscriptions.">>),
+     m(counter, [], router_matches_remote, router_matches_remote, <<"The number of matched remote subscriptions.">>)
     ].
 
 
@@ -698,11 +730,31 @@ rcn_to_str(RNC) ->
     %% TODO: replace this with a real textual representation
     atom_to_list(RNC).
 
-mqtt5_disconnect_def() ->
+mqtt5_disconnect_recv_def() ->
     RCNs =
         [
          ?NORMAL_DISCONNECT,
          ?DISCONNECT_WITH_WILL_MSG,
+         ?UNSPECIFIED_ERROR,
+         ?MALFORMED_PACKET,
+         ?PROTOCOL_ERROR,
+         ?IMPL_SPECIFIC_ERROR,
+         ?TOPIC_NAME_INVALID,
+         ?RECEIVE_MAX_EXCEEDED,
+         ?TOPIC_ALIAS_INVALID,
+         ?PACKET_TOO_LARGE,
+         ?MESSAGE_RATE_TOO_HIGH,
+         ?QUOTA_EXCEEDED,
+         ?ADMINISTRATIVE_ACTION,
+         ?PAYLOAD_FORMAT_INVALID],
+    [m(counter, [{mqtt_version,"5"},{reason_code, rcn_to_str(RCN)}],
+       {?MQTT5_DISCONNECT_RECEIVED, RCN}, mqtt_disconnect_received,
+       <<"The number of DISCONNECT packets received.">>) || RCN <- RCNs].
+
+mqtt5_disconnect_sent_def() ->
+    RCNs =
+        [
+         ?NORMAL_DISCONNECT,
          ?UNSPECIFIED_ERROR,
          ?MALFORMED_PACKET,
          ?PROTOCOL_ERROR,
@@ -731,8 +783,8 @@ mqtt5_disconnect_def() ->
          ?SUBSCRIPTION_IDS_NOT_SUPPORTED,
          ?WILDCARD_SUBS_NOT_SUPPORTED],
     [m(counter, [{mqtt_version,"5"},{reason_code, rcn_to_str(RCN)}],
-       {?MQTT5_DISCONNECT_RECEIVED, RCN}, mqtt_disconnect_received,
-       <<"The number of DISCONNECT packets received.">>) || RCN <- RCNs].
+       {?MQTT5_DISCONNECT_SENT, RCN}, mqtt_disconnect_sent,
+       <<"The number of DISCONNECT packets sent.">>) || RCN <- RCNs].
 
 mqtt5_connack_sent_def() ->
     RCNs =
@@ -887,10 +939,10 @@ mqtt4_connack_sent_def() ->
        <<"The number of CONNACK packets sent.">>) || RCN <- RCNs].
 
 rate_entries() ->
-    [{msg_in_rate, mqtt_publish_received},
-     {byte_in_rate, bytes_received},
-     {msg_out_rate, mqtt_publish_sent},
-     {byte_out_rate, bytes_sent}].
+    [{?METRIC_MSG_IN_RATE, [?MQTT4_PUBLISH_RECEIVED, ?MQTT5_PUBLISH_RECEIVED]},
+     {?METRIC_BYTE_IN_RATE, [?METRIC_BYTES_RECEIVED]},
+     {?METRIC_MSG_OUT_RATE, [?MQTT4_PUBLISH_SENT, ?MQTT5_PUBLISH_SENT]},
+     {?METRIC_BYTE_OUT_RATE, [?METRIC_BYTES_SENT]}].
 
 -spec misc_statistics() -> [{metric_id(), any()}].
 misc_statistics() ->
@@ -925,6 +977,7 @@ system_statistics() ->
     RunQueueLen = erlang:statistics(run_queue),
     {Total_Run_Time, _} = erlang:statistics(runtime),
     {Total_Wallclock_Time, _} = erlang:statistics(wall_clock),
+    ProcessCount = erlang:system_info(process_count),
     #{total := ErlangMemTotal,
       processes := ErlangMemProcesses,
       processes_used := ErlangMemProcessesUsed,
@@ -944,6 +997,7 @@ system_statistics() ->
      {system_run_queue, RunQueueLen},
      {system_runtime, Total_Run_Time},
      {system_wallclock, Total_Wallclock_Time},
+     {system_process_count, ProcessCount},
 
      {vm_memory_total, ErlangMemTotal},
      {vm_memory_processes, ErlangMemProcesses},
@@ -968,6 +1022,7 @@ system_stats_def() ->
      m(gauge, [], system_run_queue, system_run_queue, <<"The total number of processes and ports ready to run on all run-queues.">>),
      m(counter, [], system_runtime, system_runtime, <<"The sum of the runtime for all threads in the Erlang runtime system.">>),
      m(counter, [], system_wallclock, system_wallclock, <<"The number of milli-seconds passed since the node was started.">>),
+     m(gauge, [], system_process_count, system_process_count, <<"The number of Erlang processes.">>),
 
      m(gauge, [], vm_memory_total, vm_memory_total, <<"The total amount of memory allocated.">>),
      m(gauge, [], vm_memory_processes, vm_memory_processes, <<"The amount of memory allocated for processes.">>),
@@ -1028,3 +1083,200 @@ scheduler_utilization_def() ->
     [m(gauge, [], system_utilization, system_utilization,
        <<"The average system (scheduler) utilization (percentage).">>)
      |SchedUtilDefs].
+
+met2idx(?MQTT5_CONNECT_RECEIVED)                                  -> 1;
+met2idx({?MQTT5_CONNACK_SENT, ?SUCCESS})                          -> 2;
+met2idx({?MQTT5_CONNACK_SENT, ?UNSPECIFIED_ERROR})                -> 3;
+met2idx({?MQTT5_CONNACK_SENT, ?MALFORMED_PACKET})                 -> 4;
+met2idx({?MQTT5_CONNACK_SENT, ?PROTOCOL_ERROR})                   -> 5;
+met2idx({?MQTT5_CONNACK_SENT, ?IMPL_SPECIFIC_ERROR})              -> 6;
+met2idx({?MQTT5_CONNACK_SENT, ?UNSUPPORTED_PROTOCOL_VERSION})     -> 7;
+met2idx({?MQTT5_CONNACK_SENT, ?CLIENT_IDENTIFIER_NOT_VALID})      -> 8;
+met2idx({?MQTT5_CONNACK_SENT, ?BAD_USERNAME_OR_PASSWORD})         -> 9;
+met2idx({?MQTT5_CONNACK_SENT, ?NOT_AUTHORIZED})                   -> 10;
+met2idx({?MQTT5_CONNACK_SENT, ?SERVER_UNAVAILABLE})               -> 11;
+met2idx({?MQTT5_CONNACK_SENT, ?SERVER_BUSY})                      -> 12;
+met2idx({?MQTT5_CONNACK_SENT, ?BANNED})                           -> 13;
+met2idx({?MQTT5_CONNACK_SENT, ?BAD_AUTHENTICATION_METHOD})        -> 14;
+met2idx({?MQTT5_CONNACK_SENT, ?TOPIC_NAME_INVALID})               -> 15;
+met2idx({?MQTT5_CONNACK_SENT, ?PACKET_TOO_LARGE})                 -> 16;
+met2idx({?MQTT5_CONNACK_SENT, ?QUOTA_EXCEEDED})                   -> 17;
+met2idx({?MQTT5_CONNACK_SENT, ?PAYLOAD_FORMAT_INVALID})           -> 18;
+met2idx({?MQTT5_CONNACK_SENT, ?RETAIN_NOT_SUPPORTED})             -> 19;
+met2idx({?MQTT5_CONNACK_SENT, ?QOS_NOT_SUPPORTED})                -> 20;
+met2idx({?MQTT5_CONNACK_SENT, ?USE_ANOTHER_SERVER})               -> 21;
+met2idx({?MQTT5_CONNACK_SENT, ?SERVER_MOVED})                     -> 22;
+met2idx({?MQTT5_CONNACK_SENT, ?CONNECTION_RATE_EXCEEDED})         -> 23;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?NORMAL_DISCONNECT})         -> 24;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?DISCONNECT_WITH_WILL_MSG})  -> 25;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?UNSPECIFIED_ERROR})         -> 26;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?MALFORMED_PACKET})          -> 27;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?PROTOCOL_ERROR})            -> 28;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?IMPL_SPECIFIC_ERROR})       -> 29;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?TOPIC_NAME_INVALID})        -> 30;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?RECEIVE_MAX_EXCEEDED})      -> 31;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?TOPIC_ALIAS_INVALID})       -> 32;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?PACKET_TOO_LARGE})          -> 33;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?MESSAGE_RATE_TOO_HIGH})     -> 34;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?QUOTA_EXCEEDED})            -> 35;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?ADMINISTRATIVE_ACTION})     -> 36;
+met2idx({?MQTT5_DISCONNECT_RECEIVED, ?PAYLOAD_FORMAT_INVALID})    -> 37;
+met2idx({?MQTT5_DISCONNECT_SENT,?NORMAL_DISCONNECT})              -> 38;
+met2idx({?MQTT5_DISCONNECT_SENT,?UNSPECIFIED_ERROR})              -> 39;
+met2idx({?MQTT5_DISCONNECT_SENT,?MALFORMED_PACKET})               -> 40;
+met2idx({?MQTT5_DISCONNECT_SENT,?PROTOCOL_ERROR})                 -> 41;
+met2idx({?MQTT5_DISCONNECT_SENT,?IMPL_SPECIFIC_ERROR})            -> 42;
+met2idx({?MQTT5_DISCONNECT_SENT,?NOT_AUTHORIZED})                 -> 43;
+met2idx({?MQTT5_DISCONNECT_SENT,?SERVER_BUSY})                    -> 44;
+met2idx({?MQTT5_DISCONNECT_SENT,?SERVER_SHUTTING_DOWN})           -> 45;
+met2idx({?MQTT5_DISCONNECT_SENT,?KEEP_ALIVE_TIMEOUT})             -> 46;
+met2idx({?MQTT5_DISCONNECT_SENT,?SESSION_TAKEN_OVER})             -> 47;
+met2idx({?MQTT5_DISCONNECT_SENT,?TOPIC_FILTER_INVALID})           -> 48;
+met2idx({?MQTT5_DISCONNECT_SENT,?TOPIC_NAME_INVALID})             -> 49;
+met2idx({?MQTT5_DISCONNECT_SENT,?RECEIVE_MAX_EXCEEDED})           -> 50;
+met2idx({?MQTT5_DISCONNECT_SENT,?TOPIC_ALIAS_INVALID})            -> 51;
+met2idx({?MQTT5_DISCONNECT_SENT,?PACKET_TOO_LARGE})               -> 52;
+met2idx({?MQTT5_DISCONNECT_SENT,?MESSAGE_RATE_TOO_HIGH})          -> 53;
+met2idx({?MQTT5_DISCONNECT_SENT,?QUOTA_EXCEEDED})                 -> 54;
+met2idx({?MQTT5_DISCONNECT_SENT,?ADMINISTRATIVE_ACTION})          -> 55;
+met2idx({?MQTT5_DISCONNECT_SENT,?PAYLOAD_FORMAT_INVALID})         -> 56;
+met2idx({?MQTT5_DISCONNECT_SENT,?RETAIN_NOT_SUPPORTED})           -> 57;
+met2idx({?MQTT5_DISCONNECT_SENT,?QOS_NOT_SUPPORTED})              -> 58;
+met2idx({?MQTT5_DISCONNECT_SENT,?USE_ANOTHER_SERVER})             -> 59;
+met2idx({?MQTT5_DISCONNECT_SENT,?SERVER_MOVED})                   -> 60;
+met2idx({?MQTT5_DISCONNECT_SENT,?SHARED_SUBS_NOT_SUPPORTED})      -> 61;
+met2idx({?MQTT5_DISCONNECT_SENT,?CONNECTION_RATE_EXCEEDED})       -> 62;
+met2idx({?MQTT5_DISCONNECT_SENT,?MAX_CONNECT_TIME})               -> 63;
+met2idx({?MQTT5_DISCONNECT_SENT,?SUBSCRIPTION_IDS_NOT_SUPPORTED}) -> 64;
+met2idx({?MQTT5_DISCONNECT_SENT,?WILDCARD_SUBS_NOT_SUPPORTED})    -> 65;
+met2idx(?MQTT5_PUBLISH_AUTH_ERROR)                                -> 66;
+met2idx(?MQTT5_SUBSCRIBE_AUTH_ERROR)                              -> 67;
+met2idx(?MQTT5_INVALID_MSG_SIZE_ERROR)                            -> 68;
+met2idx(?MQTT5_PUBACK_INVALID_ERROR)                              -> 69;
+met2idx(?MQTT5_PUBCOMP_INVALID_ERROR)                             -> 70;
+met2idx(?MQTT5_PUBLISH_ERROR)                                     -> 71;
+met2idx(?MQTT5_SUBSCRIBE_ERROR)                                   -> 72;
+met2idx(?MQTT5_UNSUBSCRIBE_ERROR)                                 -> 73;
+met2idx(?MQTT5_PINGREQ_RECEIVED)                                  -> 74;
+met2idx(?MQTT5_PINGRESP_SENT)                                     -> 75;
+met2idx({?MQTT5_PUBACK_RECEIVED, ?SUCCESS})                       -> 76;
+met2idx({?MQTT5_PUBACK_RECEIVED, ?NO_MATCHING_SUBSCRIBERS})       -> 77;
+met2idx({?MQTT5_PUBACK_RECEIVED, ?UNSPECIFIED_ERROR})             -> 78;
+met2idx({?MQTT5_PUBACK_RECEIVED, ?IMPL_SPECIFIC_ERROR})           -> 79;
+met2idx({?MQTT5_PUBACK_RECEIVED, ?NOT_AUTHORIZED})                -> 80;
+met2idx({?MQTT5_PUBACK_RECEIVED, ?TOPIC_NAME_INVALID})            -> 81;
+met2idx({?MQTT5_PUBACK_RECEIVED, ?PACKET_ID_IN_USE})              -> 82;
+met2idx({?MQTT5_PUBACK_RECEIVED, ?QUOTA_EXCEEDED})                -> 83;
+met2idx({?MQTT5_PUBACK_RECEIVED, ?PAYLOAD_FORMAT_INVALID})        -> 84;
+met2idx({?MQTT5_PUBACK_SENT, ?SUCCESS})                           -> 85;
+met2idx({?MQTT5_PUBACK_SENT, ?NO_MATCHING_SUBSCRIBERS})           -> 86;
+met2idx({?MQTT5_PUBACK_SENT, ?UNSPECIFIED_ERROR})                 -> 87;
+met2idx({?MQTT5_PUBACK_SENT, ?IMPL_SPECIFIC_ERROR})               -> 88;
+met2idx({?MQTT5_PUBACK_SENT, ?NOT_AUTHORIZED})                    -> 89;
+met2idx({?MQTT5_PUBACK_SENT, ?TOPIC_NAME_INVALID})                -> 90;
+met2idx({?MQTT5_PUBACK_SENT, ?PACKET_ID_IN_USE})                  -> 91;
+met2idx({?MQTT5_PUBACK_SENT, ?QUOTA_EXCEEDED})                    -> 92;
+met2idx({?MQTT5_PUBACK_SENT, ?PAYLOAD_FORMAT_INVALID})            -> 93;
+met2idx({?MQTT5_PUBCOMP_RECEIVED,?SUCCESS})                       -> 94;
+met2idx({?MQTT5_PUBCOMP_RECEIVED,?PACKET_ID_NOT_FOUND})           -> 95;
+met2idx({?MQTT5_PUBCOMP_SENT, ?SUCCESS})                          -> 96;
+met2idx({?MQTT5_PUBCOMP_SENT, ?PACKET_ID_NOT_FOUND})              -> 97;
+met2idx(?MQTT5_PUBLISH_RECEIVED)                                  -> 98;
+met2idx(?MQTT5_PUBLISH_SENT)                                      -> 99;
+met2idx({?MQTT5_PUBREC_RECEIVED, ?SUCCESS})                       -> 100;
+met2idx({?MQTT5_PUBREC_RECEIVED, ?NO_MATCHING_SUBSCRIBERS})       -> 101;
+met2idx({?MQTT5_PUBREC_RECEIVED, ?UNSPECIFIED_ERROR})             -> 102;
+met2idx({?MQTT5_PUBREC_RECEIVED, ?IMPL_SPECIFIC_ERROR})           -> 103;
+met2idx({?MQTT5_PUBREC_RECEIVED, ?NOT_AUTHORIZED})                -> 104;
+met2idx({?MQTT5_PUBREC_RECEIVED, ?TOPIC_NAME_INVALID})            -> 105;
+met2idx({?MQTT5_PUBREC_RECEIVED, ?PACKET_ID_IN_USE})              -> 106;
+met2idx({?MQTT5_PUBREC_RECEIVED, ?QUOTA_EXCEEDED})                -> 107;
+met2idx({?MQTT5_PUBREC_RECEIVED, ?PAYLOAD_FORMAT_INVALID})        -> 108;
+met2idx({?MQTT5_PUBREC_SENT, ?SUCCESS})                           -> 109;
+met2idx({?MQTT5_PUBREC_SENT, ?NO_MATCHING_SUBSCRIBERS})           -> 110;
+met2idx({?MQTT5_PUBREC_SENT, ?UNSPECIFIED_ERROR})                 -> 111;
+met2idx({?MQTT5_PUBREC_SENT, ?IMPL_SPECIFIC_ERROR})               -> 112;
+met2idx({?MQTT5_PUBREC_SENT, ?NOT_AUTHORIZED})                    -> 113;
+met2idx({?MQTT5_PUBREC_SENT, ?TOPIC_NAME_INVALID})                -> 114;
+met2idx({?MQTT5_PUBREC_SENT, ?PACKET_ID_IN_USE})                  -> 115;
+met2idx({?MQTT5_PUBREC_SENT, ?QUOTA_EXCEEDED})                    -> 116;
+met2idx({?MQTT5_PUBREC_SENT, ?PAYLOAD_FORMAT_INVALID})            -> 117;
+met2idx({?MQTT5_PUBREL_RECEIVED, ?SUCCESS})                       -> 118;
+met2idx({?MQTT5_PUBREL_RECEIVED, ?PACKET_ID_NOT_FOUND})           -> 119;
+met2idx({?MQTT5_PUBREL_SENT, ?SUCCESS})                           -> 120;
+met2idx({?MQTT5_PUBREL_SENT, ?PACKET_ID_NOT_FOUND})               -> 121;
+met2idx(?MQTT5_SUBACK_SENT)                                       -> 122;
+met2idx(?MQTT5_SUBSCRIBE_RECEIVED)                                -> 123;
+met2idx(?MQTT5_UNSUBACK_SENT)                                     -> 124;
+met2idx(?MQTT5_UNSUBSCRIBE_RECEIVED)                              -> 125;
+met2idx({?MQTT5_AUTH_SENT,?SUCCESS})                              -> 126;
+met2idx({?MQTT5_AUTH_SENT,?CONTINUE_AUTHENTICATION})              -> 127;
+met2idx({?MQTT5_AUTH_SENT,?REAUTHENTICATE})                       -> 128;
+met2idx({?MQTT5_AUTH_RECEIVED, ?SUCCESS})                         -> 129;
+met2idx({?MQTT5_AUTH_RECEIVED, ?CONTINUE_AUTHENTICATION})         -> 130;
+met2idx({?MQTT5_AUTH_RECEIVED, ?REAUTHENTICATE})                  -> 131;
+met2idx({?MQTT4_CONNACK_SENT, ?CONNACK_ACCEPT})                   -> 132;
+met2idx({?MQTT4_CONNACK_SENT, ?CONNACK_PROTO_VER})                -> 133;
+met2idx({?MQTT4_CONNACK_SENT, ?CONNACK_INVALID_ID})               -> 134;
+met2idx({?MQTT4_CONNACK_SENT, ?CONNACK_SERVER})                   -> 135;
+met2idx({?MQTT4_CONNACK_SENT, ?CONNACK_CREDENTIALS})              -> 136;
+met2idx({?MQTT4_CONNACK_SENT, ?CONNACK_AUTH})                     -> 137;
+met2idx(?MQTT4_CONNECT_RECEIVED)                                  -> 138;
+met2idx(?MQTT4_PUBLISH_RECEIVED)                                  -> 139;
+met2idx(?MQTT4_PUBACK_RECEIVED)                                   -> 140;
+met2idx(?MQTT4_PUBREC_RECEIVED)                                   -> 141;
+met2idx(?MQTT4_PUBREL_RECEIVED)                                   -> 142;
+met2idx(?MQTT4_PUBCOMP_RECEIVED)                                  -> 143;
+met2idx(?MQTT4_SUBSCRIBE_RECEIVED)                                -> 144;
+met2idx(?MQTT4_UNSUBSCRIBE_RECEIVED)                              -> 145;
+met2idx(?MQTT4_PINGREQ_RECEIVED)                                  -> 146;
+met2idx(?MQTT4_DISCONNECT_RECEIVED)                               -> 147;
+met2idx(?MQTT4_PUBLISH_SENT)                                      -> 148;
+met2idx(?MQTT4_PUBACK_SENT)                                       -> 149;
+met2idx(?MQTT4_PUBREC_SENT)                                       -> 150;
+met2idx(?MQTT4_PUBREL_SENT)                                       -> 151;
+met2idx(?MQTT4_PUBCOMP_SENT)                                      -> 152;
+met2idx(?MQTT4_SUBACK_SENT)                                       -> 153;
+met2idx(?MQTT4_UNSUBACK_SENT)                                     -> 154;
+met2idx(?MQTT4_PINGRESP_SENT)                                     -> 155;
+met2idx(?MQTT4_PUBLISH_AUTH_ERROR)                                -> 156;
+met2idx(?MQTT4_SUBSCRIBE_AUTH_ERROR)                              -> 157;
+met2idx(?MQTT4_INVALID_MSG_SIZE_ERROR)                            -> 158;
+met2idx(?MQTT4_PUBACK_INVALID_ERROR)                              -> 159;
+met2idx(?MQTT4_PUBREC_INVALID_ERROR)                              -> 160;
+met2idx(?MQTT4_PUBCOMP_INVALID_ERROR)                             -> 161;
+met2idx(?MQTT4_PUBLISH_ERROR)                                     -> 162;
+met2idx(?MQTT4_SUBSCRIBE_ERROR)                                   -> 163;
+met2idx(?MQTT4_UNSUBSCRIBE_ERROR)                                 -> 164;
+met2idx(?METRIC_QUEUE_SETUP)                                      -> 165;
+met2idx(?METRIC_QUEUE_INITIALIZED_FROM_STORAGE)                   -> 166;
+met2idx(?METRIC_QUEUE_TEARDOWN)                                   -> 167;
+met2idx(?METRIC_QUEUE_MESSAGE_DROP)                               -> 168;
+met2idx(?METRIC_QUEUE_MESSAGE_EXPIRED)                            -> 169;
+met2idx(?METRIC_QUEUE_MESSAGE_UNHANDLED)                          -> 170;
+met2idx(?METRIC_QUEUE_MESSAGE_IN)                                 -> 171;
+met2idx(?METRIC_QUEUE_MESSAGE_OUT)                                -> 172;
+met2idx(?METRIC_CLIENT_EXPIRED)                                   -> 173;
+met2idx(?METRIC_CLUSTER_BYTES_RECEIVED)                           -> 174;
+met2idx(?METRIC_CLUSTER_BYTES_SENT)                               -> 175;
+met2idx(?METRIC_CLUSTER_BYTES_DROPPED)                            -> 176;
+met2idx(?METRIC_SOCKET_OPEN)                                      -> 177;
+met2idx(?METRIC_SOCKET_CLOSE)                                     -> 178;
+met2idx(?METRIC_SOCKET_ERROR)                                     -> 179;
+met2idx(?METRIC_BYTES_RECEIVED)                                   -> 180;
+met2idx(?METRIC_BYTES_SENT)                                       -> 181;
+met2idx(?METRIC_MSG_IN_RATE)                                      -> 182;
+met2idx(?METRIC_MSG_OUT_RATE)                                     -> 183;
+met2idx(?METRIC_BYTE_IN_RATE)                                     -> 184;
+met2idx(?METRIC_BYTE_OUT_RATE)                                    -> 185;
+met2idx(?METRIC_ROUTER_MATCHES_LOCAL)                             -> 186;
+met2idx(?METRIC_ROUTER_MATCHES_REMOTE)                            -> 187;
+met2idx(mqtt_connack_not_authorized_sent)                         -> 188;
+met2idx(mqtt_connack_bad_credentials_sent)                        -> 189;
+met2idx(mqtt_connack_server_unavailable_sent)                     -> 190;
+met2idx(mqtt_connack_identifier_rejected_sent)                    -> 191;
+met2idx(mqtt_connack_unacceptable_protocol_sent)                  -> 192;
+met2idx(mqtt_connack_accepted_sent)                               -> 193;
+met2idx(?METRIC_SOCKET_CLOSE_TIMEOUT)                             -> 194;
+met2idx(?MQTT5_CLIENT_KEEPALIVE_EXPIRED)                          -> 195;
+met2idx(?MQTT4_CLIENT_KEEPALIVE_EXPIRED)                          -> 196.

@@ -137,6 +137,7 @@ br2b_disconnect_qos1(_) ->
     Suback = packet:gen_suback(1, 1),
     Publish = packet:gen_publish("bridge/disconnect/test", 1, <<"disconnect-message">>, [{mid, 2}]),
     PublishDup = packet:gen_publish("bridge/disconnect/test", 1, <<"disconnect-message">>, [{mid, 2}, {dup, true}]),
+    Puback = packet:gen_puback(2),
     Subscribe2 = packet:gen_subscribe(3, "bridge/#", 1),
     Suback2 = packet:gen_suback(3, 1),
     {ok, SSocket} = gen_tcp:listen(1890, [binary, {packet, raw}, {active, false}, {reuseaddr, true}]),
@@ -156,9 +157,14 @@ br2b_disconnect_qos1(_) ->
     {ok, Bridge2} = gen_tcp:accept(SSocket),
     ok = packet:expect_packet(Bridge2, "2nd connect", Connect),
     ok = gen_tcp:send(Bridge2, Connack),
+    ok = packet:expect_packet(Bridge2, "2nd publish", PublishDup),
     ok = packet:expect_packet(Bridge2, "2nd subscribe", Subscribe2),
     ok = gen_tcp:send(Bridge2, Suback2),
+
+    % expect the 2nd publish being retried, as it's not acked
     ok = packet:expect_packet(Bridge2, "2nd publish", PublishDup),
+    ok = gen_tcp:send(Bridge2, Puback),
+
     ok = gen_tcp:close(Bridge2),
     ?_assertEqual(ok, gen_tcp:close(SSocket)).
 
@@ -195,18 +201,18 @@ br2b_disconnect_qos2(_) ->
     {ok, Bridge2} = gen_tcp:accept(SSocket),
     ok = packet:expect_packet(Bridge2, "2nd connect", Connect),
     ok = gen_tcp:send(Bridge2, Connack),
-    ok = packet:expect_packet(Bridge2, "2nd subscribe", Subscribe2),
-    ok = gen_tcp:send(Bridge2, Suback2),
     ok = packet:expect_packet(Bridge2, "2nd publish", PublishDup),
     ok = gen_tcp:send(Bridge2, Pubrec),
+    ok = packet:expect_packet(Bridge2, "2nd subscribe", Subscribe2),
+    ok = gen_tcp:send(Bridge2, Suback2),
     ok = packet:expect_packet(Bridge2, "pubrel", Pubrel),
     ok = gen_tcp:close(Bridge2),
     {ok, Bridge3} = gen_tcp:accept(SSocket),
     ok = packet:expect_packet(Bridge3, "3rd connect", Connect),
     ok = gen_tcp:send(Bridge3, Connack),
+    ok = packet:expect_packet(Bridge3, "2nd pubrel", Pubrel),
     ok = packet:expect_packet(Bridge3, "3rd subscribe", Subscribe3),
     ok = gen_tcp:send(Bridge3, Suback3),
-    ok = packet:expect_packet(Bridge3, "2nd pubrel", Pubrel),
     ok = gen_tcp:send(Bridge3, Pubcomp),
     ok = gen_tcp:close(Bridge3),
     ?_assertEqual(ok, gen_tcp:close(SSocket)).
@@ -244,8 +250,9 @@ start_bridge_plugin(QoS) ->
                         {[
                           %% TCP Bridges
                           {"localhost:1890", [{topics, [{"bridge/#", both, QoS, "", ""}]},
-                                                 {restart_timeout, 5},
-                                                 {client_id, "bridge-test"}]}
+                                              {restart_timeout, 5},
+                                              {client_id, "bridge-test"},
+                                              {retry_interval, 1}]}
                          ],
                          [
                           %% SSL Bridges

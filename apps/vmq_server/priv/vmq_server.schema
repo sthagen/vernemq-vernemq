@@ -1,7 +1,10 @@
 %% -*- mode: erlang -*-
 %% ex: ft=erlang
 
-%% @doc Allow anonymous users to connect, default is 'off'
+%% @doc Allow anonymous users to connect, default is 'off'. !!NOTE!!
+%% Enabling this completely disables authentication of the clients and
+%% should only be used for testing/development purposes or in case
+%% clients are authenticated by some other means.
 {mapping, "allow_anonymous", "vmq_server.allow_anonymous", [
                                                                {default, off},
                                                                {datatype, flag}
@@ -31,12 +34,32 @@
                                                                                                 {datatype, flag}
                                                                                                ]}.
 
-%% @doc Allows a client to logon multiple times using the same client id
-%% (non-standard behaviour!).
+%% @doc Allows a client to logon multiple times using the same client
+%% id (non-standard behaviour!). This feature is DEPRECATED and will
+%% be removed in VerneMQ 2.0.
 {mapping, "allow_multiple_sessions", "vmq_server.allow_multiple_sessions", [
                                                                {default, off},
                                                                {datatype, flag}
                                                               ]}.
+
+{translation, "vmq_server.allow_multiple_sessions",
+ fun(Conf) ->
+         case cuttlefish:conf_get("allow_multiple_sessions", Conf) of
+             true ->
+                 cuttlefish:warn("allow_multiple_sessions is deprecated and will be removed in VerneMQ 2.0"),
+                 true;
+             false -> false
+         end
+ end}.
+
+%% @doc Client registrations can be either happen in a coordinated or
+%% uncoordinated fashion. Uncoordinated registrations are faster and
+%% will cause other clients with the same client-id to be eventually
+%% disconnected, while coordinated ensures that any other client with
+%% the same client-id will be immediately disconnected.
+{mapping, "coordinate_registrations", "vmq_server.coordinate_registrations",
+ [{default, on},
+  {datatype, flag}]}.
 
 %% @doc If allow_multiple_sessions is enabled 'queue_deliver_mode' will specify
 %% how the messages are delivered to multiple sessions. Default is 'fanout' which
@@ -296,13 +319,13 @@
 %% @doc specifies the timeout for enqueing something in a queue on a remote node.
 {mapping, "remote_enqueue_timeout", "vmq_server.remote_enqueue_timeout", [
                                                                           {default, 5000},
-                                                                          {datatype, integer},
+                                                                          {datatype, [integer, {atom, infinity}]},
                                                                           hidden
                                                                          ]}.
 
 %% @doc specifies the modules that should be evaluated when setting up the cowboy routes
 {mapping, "http_modules", "vmq_server.http_modules", [
-                                                      {default, "[vmq_metrics_http,vmq_http_mgmt_api, vmq_status_http]"},
+                                                      {default, "[vmq_metrics_http,vmq_http_mgmt_api, vmq_status_http, vmq_health_http]"},
                                                       {datatype, string},
                                                       hidden
                                                      ]}.
@@ -312,6 +335,63 @@
          {ok, T, _} = erl_scan:string(S ++ "."),
          {ok, Term} = erl_parse:parse_term(T),
          Term
+ end}.
+
+%% @doc listener.tcp.buffer_sizes is an list of three integers
+%% (sndbuf,recbuf,buffer) specifying respectively the kernel TCP send
+%% buffer, the kernel TCP receive buffer and the user-level buffer
+%% size in the erlang driver.
+%%
+%% It is recommended to have val(user-level buffer) >= val(receive
+%% buffer) to avoid performance issues because of unnecessary copying.
+%%
+%% If not set, the operating system defaults are used.
+%%
+%% This option can be set on the protocol level by:
+%%
+%%     - listener.tcp.buffer_sizes
+%%     - listener.ssl.buffer_sizes
+%%
+%% or on the listener level by:
+%%
+%%     - listener.tcp.my_tcp_listener.buffer_sizes
+%%     - listener.ssl.my_ssl_listener.buffer_sizes
+{mapping, "listener.tcp.buffer_sizes", "vmq_server.listeners",
+ [{commented, "4096,16384,32768"},
+  {datatype, string},
+  {validators, ["buffer_size_validator"]}
+ ]}.
+
+{mapping, "listener.tcp.$name.buffer_sizes", "vmq_server.listeners",
+ [{datatype, string},
+  hidden,
+  {validators, ["buffer_size_validator"]}
+ ]}.
+
+{mapping, "listener.ssl.buffer_sizes", "vmq_server.listeners",
+ [{datatype, string},
+  hidden,
+  {validators, ["buffer_size_validator"]}
+ ]}.
+
+{mapping, "listener.ssl.$name.buffer_sizes", "vmq_server.listeners",
+ [{datatype, string},
+  hidden,
+  {validators, ["buffer_size_validator"]}
+ ]}.
+
+
+{validator, "buffer_size_validator", "value must be three comma-separated, positive integers",
+ fun(Val) when is_list(Val) ->
+         case vmq_schema:parse_list_to_term(Val) of
+             {ok, [A,B,C]} when is_integer(A), is_integer(B), is_integer(C),
+                                A >= 0, B >= 0, C >= 0 ->
+                 true;
+             _ ->
+                 false
+         end;
+    (Val) ->
+         false
  end}.
 
 %% @doc listener.max_connections is an integer or 'infinity' defining 
@@ -667,10 +747,11 @@
 %%     - listener.wss.my_ws_listener.allowed_protocol_versions
 %%     - listener.ssl.my_ws_listener.allowed_protocol_versions
 %%
-%%
+%% Allowed values are 3 (MQTT 3.1), 4 (MQTT 3.1.1), 5 (MQTT 5.0), 131
+%% (MQTT 3.1 bridge).
 {mapping, "listener.tcp.allowed_protocol_versions", "vmq_server.listeners",
  [
-  {default, "3,4"},
+  {default, "3,4,131"},
   {datatype, string},
   {commented, "3,4"}
  ]}.
@@ -683,7 +764,7 @@
 
 {mapping, "listener.ws.allowed_protocol_versions", "vmq_server.listeners",
  [
-  {default, "3,4"},
+  {default, "3,4,131"},
   {datatype, string},
   hidden
  ]}.
@@ -696,7 +777,7 @@
 
 {mapping, "listener.wss.allowed_protocol_versions", "vmq_server.listeners",
  [
-  {default, "3,4"},
+  {default, "3,4,131"},
   {datatype, string},
   hidden
  ]}.
@@ -709,7 +790,7 @@
 
 {mapping, "listener.ssl.allowed_protocol_versions", "vmq_server.listeners",
  [
-  {default, "3,4"},
+  {default, "3,4,131"},
   {datatype, string},
   hidden
  ]}.
@@ -793,89 +874,66 @@
 %%     - listener.ws.my_ws_listener.mountpoint
 %%     - listener.wss.my_wss_listener.mountpoint
 {mapping, "listener.mountpoint", "vmq_server.listeners", [{default, "off"},
-                                                             {datatype, string}
-                                                            ]}. 
+                                                          {datatype, string},
+                                                          hidden
+                                                         ]}.
 {mapping, "listener.tcp.mountpoint", "vmq_server.listeners", [
-                                                                 {default, ""},
-                                                                 {datatype, string},
-                                                                 hidden
-                                                                ]}. 
+                                                              {datatype, string},
+                                                              hidden
+                                                             ]}.
 
 {mapping, "listener.tcp.$name.mountpoint", "vmq_server.listeners", [
-                                                                       {default, ""},
-                                                                       {datatype, string},
-                                                                       hidden
-                                                                      ]}. 
+                                                                    {datatype, string},
+                                                                    hidden
+                                                                   ]}.
 
 {mapping, "listener.ws.mountpoint", "vmq_server.listeners", [
-                                                                       {default, ""},
-                                                                       {datatype, string},
-                                                                       hidden
-                                                                      ]}. 
+                                                             {datatype, string},
+                                                             hidden
+                                                            ]}.
 
 {mapping, "listener.ws.$name.mountpoint", "vmq_server.listeners", [
-                                                                             {default, ""},
-                                                                             {datatype, string},
-                                                                             hidden
-                                                                            ]}. 
-{mapping, "listener.wss.mountpoint", "vmq_server.listeners", [
-                                                                       {default, ""},
-                                                                       {datatype, string},
-                                                                       hidden
-                                                                      ]}. 
-
-{mapping, "listener.wss.$name.mountpoint", "vmq_server.listeners", [
-                                                                             {default, ""},
-                                                                             {datatype, string},
-                                                                             hidden
-                                                                            ]}. 
+                                                                   {datatype, string},
+                                                                   hidden
+                                                                  ]}.
 
 {mapping, "listener.wss.mountpoint", "vmq_server.listeners", [
-                                                                 {default, ""},
-                                                                 {datatype, string},
-                                                                 hidden
-                                                                ]}. 
+                                                              {datatype, string},
+                                                              hidden
+                                                             ]}.
 
 {mapping, "listener.wss.$name.mountpoint", "vmq_server.listeners", [
-                                                                       {default, ""},
-                                                                       {datatype, string},
-                                                                       hidden
-                                                                      ]}. 
-
+                                                                    {datatype, string},
+                                                                    hidden
+                                                                   ]}.
 
 {mapping, "listener.ssl.mountpoint", "vmq_server.listeners", [
-                                                                 {default, ""},
-                                                                 {datatype, string},
-                                                                 hidden
-                                                                ]}. 
+                                                              {datatype, string},
+                                                              hidden
+                                                             ]}.
 
 {mapping, "listener.ssl.$name.mountpoint", "vmq_server.listeners", [
-                                                                       {default, ""},
-                                                                       {datatype, string},
-                                                                       hidden
+                                                                    {datatype, string},
+                                                                    hidden
                                                                 ]}. 
 {mapping, "listener.vmq.mountpoint", "vmq_server.listeners", [
-                                                                 {default, ""},
-                                                                 {datatype, string},
-                                                                 hidden
-                                                                ]}. 
+                                                              {datatype, string},
+                                                              hidden
+                                                             ]}.
 
 {mapping, "listener.vmq.$name.mountpoint", "vmq_server.listeners", [
-                                                                       {default, ""},
-                                                                       {datatype, string},
-                                                                       hidden
-                                                                      ]}. 
+                                                                    {datatype, string},
+                                                                    hidden
+                                                                   ]}.
 {mapping, "listener.vmqs.mountpoint", "vmq_server.listeners", [
-                                                                 {default, ""},
-                                                                 {datatype, string},
-                                                                 hidden
-                                                                ]}. 
+                                                               {datatype, string},
+                                                               hidden
+                                                              ]}.
 
 {mapping, "listener.vmqs.$name.mountpoint", "vmq_server.listeners", [
-                                                                       {default, ""},
-                                                                       {datatype, string},
-                                                                       hidden
-                                                                      ]}. 
+                                                                     {datatype, string},
+                                                                     hidden
+                                                                    ]}.
 
 %% @doc The cafile is used to define the path to a file containing 
 %% the PEM encoded CA certificates that are trusted. Set the cafile 
@@ -891,39 +949,47 @@
 {mapping, "listener.ssl.cafile", "vmq_server.listeners", [
                                                           {default, ""},
                                                           {datatype, file},
-                                                          {commented, "{{platform_etc_dir}}/cacerts.pem"}
-                                                         ]}. 
+                                                          {commented, "{{platform_etc_dir}}/cacerts.pem"},
+                                                          {validators, ["file-exists", "file-is-readable"]}
+                                                         ]}.
 
 {mapping, "listener.ssl.$name.cafile", "vmq_server.listeners", [
-                                                                {datatype, string},
+                                                                {datatype, file},
+                                                                {validators, ["file-exists", "file-is-readable"]},
                                                                 hidden
-                                                               ]}. 
+                                                               ]}.
 {mapping, "listener.wss.cafile", "vmq_server.listeners", [
                                                           {default, ""},
                                                           {datatype, file},
+                                                          {validators, ["file-exists", "file-is-readable"]},
                                                           hidden
                                                          ]}. 
 {mapping, "listener.wss.$name.cafile", "vmq_server.listeners", [
-                                                                {datatype, string},
+                                                                {datatype, file},
+                                                                {validators, ["file-exists", "file-is-readable"]},
                                                                 hidden
                                                                ]}. 
 {mapping, "listener.vmqs.cafile", "vmq_server.listeners", [
                                                            {default, ""},
                                                            {datatype, file},
+                                                           {validators, ["file-exists", "file-is-readable"]},
                                                            hidden
                                                           ]}. 
 {mapping, "listener.vmqs.$name.cafile", "vmq_server.listeners", [
-                                                                {datatype, string},
+                                                                {datatype, file},
+                                                                {validators, ["file-exists", "file-is-readable"]},
                                                                 hidden
                                                                ]}. 
 {mapping, "listener.https.cafile", "vmq_server.listeners", [
                                                             {default, ""},
                                                             {datatype, file},
+                                                            {validators, ["file-exists", "file-is-readable"]},
                                                             {commented, "{{platform_etc_dir}}/cacerts.pem"}
                                                            ]}. 
 
 {mapping, "listener.https.$name.cafile", "vmq_server.listeners", [
-                                                                {datatype, string},
+                                                                {datatype, file},
+                                                                {validators, ["file-exists", "file-is-readable"]},
                                                                 hidden
                                                                ]}. 
 
@@ -993,38 +1059,46 @@
 {mapping, "listener.ssl.certfile", "vmq_server.listeners", [
                                                             {default, ""},
                                                             {datatype, file},
+                                                            {validators, ["file-exists", "file-is-readable"]},
                                                             {commented, "{{platform_etc_dir}}/cert.pem"}
                                                            ]}. 
 {mapping, "listener.ssl.$name.certfile", "vmq_server.listeners", [
                                                                   {datatype, file},
+                                                                  {validators, ["file-exists", "file-is-readable"]},
                                                                   hidden
                                                                  ]}. 
 {mapping, "listener.wss.certfile", "vmq_server.listeners", [
                                                             {default, ""},
                                                             {datatype, file},
+                                                            {validators, ["file-exists", "file-is-readable"]},
                                                             hidden
                                                            ]}. 
 {mapping, "listener.wss.$name.certfile", "vmq_server.listeners", [
                                                                   {datatype, file},
+                                                                  {validators, ["file-exists", "file-is-readable"]},
                                                                   hidden
                                                                  ]}. 
 {mapping, "listener.vmqs.certfile", "vmq_server.listeners", [
                                                              {default, ""},
                                                              {datatype, file},
+                                                             {validators, ["file-exists", "file-is-readable"]},
                                                              hidden
                                                             ]}. 
 {mapping, "listener.vmqs.$name.certfile", "vmq_server.listeners", [
-                                                                  {datatype, file},
-                                                                  hidden
-                                                                 ]}. 
+                                                                   {datatype, file},
+                                                                   {validators, ["file-exists", "file-is-readable"]},
+                                                                   hidden
+                                                                  ]}.
 {mapping, "listener.https.certfile", "vmq_server.listeners", [
                                                               {default, ""},
                                                               {datatype, file},
+                                                              {validators, ["file-exists", "file-is-readable"]},
                                                               {commented, "{{platform_etc_dir}}/cert.pem"}
                                                              ]}. 
 {mapping, "listener.https.$name.certfile", "vmq_server.listeners", [
-                                                                  {datatype, file},
-                                                                  hidden
+                                                                    {datatype, file},
+                                                                    {validators, ["file-exists", "file-is-readable"]},
+                                                                    hidden
                                                                  ]}. 
 %% @doc Set the path to the PEM encoded key file on the protocol 
 %% level or on the listener level:
@@ -1039,40 +1113,49 @@
 {mapping, "listener.ssl.keyfile", "vmq_server.listeners", [
                                                            {default, ""},
                                                            {datatype, file},
+                                                           {validators, ["file-exists", "file-is-readable"]},
                                                            {commented, "{{platform_etc_dir}}/key.pem"}
                                                           ]}. 
 {mapping, "listener.ssl.$name.keyfile", "vmq_server.listeners", [
                                                                  {datatype, file},
+                                                                 {validators, ["file-exists", "file-is-readable"]},
                                                                  hidden
                                                                 ]}. 
 {mapping, "listener.wss.keyfile", "vmq_server.listeners", [
                                                            {default, ""},
                                                            {datatype, file},
+                                                           {validators, ["file-exists", "file-is-readable"]},
                                                            hidden
                                                           ]}. 
 {mapping, "listener.wss.$name.keyfile", "vmq_server.listeners", [
                                                                  {datatype, file},
+                                                                 {validators, ["file-exists", "file-is-readable"]},
                                                                  hidden
                                                                 ]}. 
 {mapping, "listener.vmqs.keyfile", "vmq_server.listeners", [
                                                             {default, ""},
                                                             {datatype, file},
+                                                            {validators, ["file-exists", "file-is-readable"]},
                                                             {commented, "{{platform_etc_dir}}/key.pem"}
                                                            ]}. 
 {mapping, "listener.vmqs.$name.keyfile", "vmq_server.listeners", [
                                                                   {datatype, file},
+                                                                  {validators, ["file-exists", "file-is-readable"]},
                                                                   hidden
                                                                 ]}. 
 {mapping, "listener.https.keyfile", "vmq_server.listeners", [
                                                              {default, ""},
                                                              {datatype, file},
+                                                             {validators, ["file-exists", "file-is-readable"]},
                                                              {commented, "{{platform_etc_dir}}/key.pem"}
                                                             ]}. 
 {mapping, "listener.https.$name.keyfile", "vmq_server.listeners", [
                                                                    {datatype, file},
+                                                                   {validators, ["file-exists", "file-is-readable"]},
                                                                    hidden
                                                                   ]}. 
-%% @doc Set the list of allowed ciphers (each separated with a colon),
+%% @doc Set the list of allowed ciphers (each separated with a colon,
+%% e.g. "ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384"),
 %% on the protocol level or on the listener level. Reasonable defaults
 %% are used if nothing is specified:
 %%
@@ -1134,38 +1217,46 @@
 %%     - listener.wss.my_wss_listener.crlfile
 {mapping, "listener.ssl.crlfile", "vmq_server.listeners", [
                                                            {default, ""},
-                                                           {datatype, string},
+                                                           {datatype, file},
+                                                           {validators, ["file-exists", "file-is-readable"]},
                                                            {commented, ""}
                                                           ]}. 
 {mapping, "listener.ssl.$name.crlfile", "vmq_server.listeners", [
-                                                                 {datatype, string},
+                                                                 {datatype, file},
+                                                                 {validators, ["file-exists", "file-is-readable"]},
                                                                  hidden
                                                                 ]}. 
 {mapping, "listener.wss.crlfile", "vmq_server.listeners", [
                                                            {default, ""},
-                                                           {datatype, string},
+                                                           {datatype, file},
+                                                           {validators, ["file-exists", "file-is-readable"]},
                                                            hidden
                                                           ]}. 
 {mapping, "listener.wss.$name.crlfile", "vmq_server.listeners", [
-                                                                 {datatype, string},
+                                                                 {datatype, file},
+                                                                 {validators, ["file-exists", "file-is-readable"]},
                                                                  hidden
                                                                 ]}. 
 {mapping, "listener.vmqs.crlfile", "vmq_server.listeners", [
                                                             {default, ""},
-                                                            {datatype, string},
+                                                            {datatype, file},
+                                                            {validators, ["file-exists", "file-is-readable"]},
                                                             hidden
                                                            ]}. 
 {mapping, "listener.vmqs.$name.crlfile", "vmq_server.listeners", [
-                                                                 {datatype, string},
+                                                                 {datatype, file},
+                                                                  {validators, ["file-exists", "file-is-readable"]},
                                                                  hidden
                                                                 ]}. 
 {mapping, "listener.https.crlfile", "vmq_server.listeners", [
                                                              {default, ""},
-                                                             {datatype, string},
+                                                             {datatype, file},
+                                                             {validators, ["file-exists", "file-is-readable"]},
                                                              hidden
                                                             ]}. 
 {mapping, "listener.https.$name.crlfile", "vmq_server.listeners", [
-                                                                   {datatype, string},
+                                                                   {datatype, file},
+                                                                   {validators, ["file-exists", "file-is-readable"]},
                                                                    hidden
                                                                   ]}. 
 %% @doc Enable this option if you want to use SSL client certificates 
@@ -1425,6 +1516,12 @@
                                                                        hidden
                                                                       ]}.
 
+{mapping, "plumtree.drop_i_have_threshold", "plumtree.drop_i_have_threshold", [
+                                                                               {default, 1000000},
+                                                                               {datatype, integer},
+                                                                               hidden
+                                                                              ]}.
+
 %% the setup utility will call hooks to create the default directories,
 %% however the setup defaults e.g. data.<nodename> are not matching with our 
 %% defaults, so we need to override them.
@@ -1532,12 +1629,6 @@
                                                          {default, on}
                                                         ]}.
 
-%% @doc Dummy MQTTv5 plugin allowing everything.
-{mapping, "plugins.vmq_allow_all_v5", "vmq_server.user_plugins", [
-                                                                  {datatype, flag},
-                                                                  {default, on}
-                                                                 ]}.
-
 %% @doc Lua based plugins.
 {mapping, "plugins.vmq_diversity", "vmq_server.user_plugins", [
                                                                {datatype, flag},
@@ -1611,3 +1702,31 @@
                                                                   {datatype, integer},
                                                                   hidden
                                                                  ]}.
+
+%% @doc Specifies the metadata plugin that is used for storing and replicating
+%% VerneMQ metadata objects such as MQTT subscriptions and retained messages.
+%%
+%% The default is `vmq_plumtree` which is stable and shows good performance
+%% results for most use cases.
+%%
+%% `vmq_swc` is still in Beta, but will likely deprecate `vmq_plumtree` in the
+%% next major version (2.0). `vmq_swc` aims to overcome multiple scalability
+%% limitations that can be observed with `vmq_plumtree`.
+{mapping, "metadata_plugin", "vmq_server.metadata_impl", [{default, {{ metadata_plugin }} },
+                                                          {datatype, {enum, [vmq_plumtree, vmq_swc]}}
+                                                         ]}.
+
+{validator, "file-exists", "file does not exist",
+ fun("") ->
+         %% "" is used as the default value in most places, we should
+         %% not error out because of that.
+         true;
+    (Name) -> vmq_schema_util:file_exists(Name)
+ end}.
+{validator, "file-is-readable", "file is not readable, check permissions",
+ fun("") ->
+         %% "" is used as the default value in most places, we should
+         %% not error out because of that.
+         true;
+    (Name) -> vmq_schema_util:file_is_readable(Name)
+ end}.

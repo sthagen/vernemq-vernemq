@@ -13,7 +13,9 @@
 %% limitations under the License.
 
 -module(vmq_lvldb_store).
+-include_lib("stdlib/include/ms_transform.hrl").
 -include("vmq_server.hrl").
+-include("vmq_lvldb_store.hrl").
 -behaviour(gen_server).
 
 %% API
@@ -21,11 +23,12 @@
          msg_store_write/2,
          msg_store_read/2,
          msg_store_delete/2,
-         msg_store_find/1,
+         msg_store_find/2,
          get_ref/1,
-         refcount/1]).
+         refcount/1,
+         get_state/1]).
 
--export([msg_store_init_queue_collector/3]).
+-export([msg_store_init_queue_collector/4]).
 
 -export([parse_p_idx_val_pre/1,
          parse_p_msg_val_pre/1,
@@ -40,7 +43,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, {ref :: eleveldb:db_ref(),
+-record(state, {ref :: undefined | eleveldb:db_ref(),
                 data_root :: string(),
                 open_opts = [],
                 config :: config(),
@@ -81,35 +84,73 @@ msg_store_delete(SubscriberId, MsgRef) ->
 msg_store_read(SubscriberId, MsgRef) ->
     call(MsgRef, {read, SubscriberId, MsgRef}).
 
-msg_store_find(SubscriberId) ->
+
+%% We differentiate between queue_init and other as queue_init must
+%% not be called concurrently for the same subscriber.
+msg_store_find(SubscriberId, Type) when Type =:= queue_init;
+                                        Type =:= other ->
     Ref = make_ref(),
     {Pid, MRef} = spawn_monitor(?MODULE, msg_store_init_queue_collector,
-                                [self(), SubscriberId, Ref]),
+                                [self(), SubscriberId, Ref, Type]),
     receive
         {'DOWN', MRef, process, Pid, Reason} ->
             {error, Reason};
-        {Pid, Ref, Result} ->
+        {Pid, Ref, MsgRefs} ->
             demonitor(MRef, [flush]),
-            {_, MsgRefs} = lists:unzip(Result),
             {ok, MsgRefs}
     end.
 
-msg_store_init_queue_collector(ParentPid, SubscriberId, Ref) ->
-    Pids = vmq_lvldb_store_sup:get_bucket_pids(),
-    Acc = ordsets:new(),
-    ResAcc = msg_store_collect(SubscriberId, Pids, Acc),
-    ParentPid ! {self(), Ref, ordsets:to_list(ResAcc)}.
+msg_store_init_queue_collector(ParentPid, SubscriberId, Ref, queue_init) ->
+    MsgRefs =
+        case msg_store_init_from_tbl(init, SubscriberId) of
+            [] ->
+                init_from_disk(SubscriberId);
+            Res ->
+                Res
+        end,
+    ParentPid ! {self(), Ref, MsgRefs};
+msg_store_init_queue_collector(ParentPid, SubscriberId, Ref, other) ->
+    MsgRefs = init_from_disk(SubscriberId),
+    ParentPid ! {self(), Ref, MsgRefs}.
 
-msg_store_collect(_, [], Acc) -> Acc;
-msg_store_collect(SubscriberId, [Pid|Rest], Acc) ->
-    Res = gen_server:call(Pid, {find_for_subscriber_id, SubscriberId}, infinity),
-    msg_store_collect(SubscriberId, Rest, ordsets:union(Res, Acc)).
+init_from_disk(SubscriberId) ->
+    TblIdxRef = make_ref(),
+    Pids = vmq_lvldb_store_sup:get_bucket_pids(),
+    ok = msg_store_collect(TblIdxRef, SubscriberId, Pids),
+    msg_store_init_from_tbl(TblIdxRef, SubscriberId).
+
+msg_store_init_from_tbl(Prefix, SubscriberId) ->
+    MS = ets:fun2ms(
+           fun({{P, S, _TS, MsgRef}}) when P =:= Prefix, S =:= SubscriberId ->
+                   MsgRef
+           end),
+    MSDel = ets:fun2ms(
+           fun({{P, S, _TS, _MsgRef}}) when P =:= Prefix, S =:= SubscriberId ->
+                   true
+           end),
+    Table = select_table(SubscriberId),
+    MsgRefs = ets:select(Table, MS),
+    _Deleted = ets:select_delete(Table, MSDel),
+    MsgRefs.
+
+msg_store_collect(_Ref, _, []) -> ok;
+msg_store_collect(Ref, SubscriberId, [Pid|Rest]) ->
+    ok = try
+             gen_server:call(Pid, {find_for_subscriber_id, Ref, SubscriberId}, infinity)
+         catch
+             {'EXIT', {noproc, _}} ->
+                 ok
+         end,
+    msg_store_collect(Ref, SubscriberId, Rest).
 
 get_ref(BucketPid) ->
     gen_server:call(BucketPid, get_ref).
 
 refcount(MsgRef) ->
     call(MsgRef, {refcount, MsgRef}).
+
+get_state(Pid) ->
+    gen_server:call(Pid, get_state, infinity).
 
 call(Key, Req) ->
     case vmq_lvldb_store_sup:get_bucket_pid(Key) of
@@ -147,14 +188,7 @@ init([InstanceId]) ->
     process_flag(trap_exit, true),
     case open_db(Opts, S0) of
         {ok, State} ->
-            case check_store(State) of
-                0 -> ok; % no unreferenced images
-                N ->
-                    lager:info("found and deleted ~p unreferenced messages in msg store instance ~p",
-                               [N, InstanceId])
-            end,
-            %% Register Bucket Instance with the Bucket Registry
-            vmq_lvldb_store_sup:register_bucket_pid(InstanceId, self()),
+            self() ! {initialize_from_storage, InstanceId},
             {ok, State};
         {error, Reason} ->
             {stop, Reason}
@@ -183,6 +217,10 @@ handle_call({refcount, MsgRef}, _From, State) ->
         [{_, Cnt}] -> Cnt
     end,
     {reply, RefCount, State};
+handle_call(get_state, _From, State) ->
+    %% when called externally, the store is always initialized, so
+    %% just return that here.
+    {reply, initialized, State};
 handle_call(Request, _From, State) ->
     {reply, handle_req(Request, State), State}.
 
@@ -209,6 +247,16 @@ handle_cast(_Request, State) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_info({initialize_from_storage, InstanceId}, State) ->
+    case setup_index(State) of
+        0 -> ok;
+        N ->
+            lager:info("indexed ~p offline messages in msg store instance ~p",
+                       [N, InstanceId])
+    end,
+    %% Register Bucket Instance with the Bucket Registry
+    vmq_lvldb_store_sup:register_bucket_pid(InstanceId, self()),
+    {noreply, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -341,7 +389,6 @@ handle_req({write, {MP, _} = SubscriberId,
                      routing_key=RoutingKey, payload=Payload}},
            #state{ref=Bucket, refs=Refs, write_opts=WriteOpts}) ->
     MsgKey = sext:encode({msg, MsgRef, {MP, ''}}),
-    RefKey = sext:encode({msg, MsgRef, SubscriberId}),
     IdxKey = sext:encode({idx, SubscriberId, MsgRef}),
     IdxVal = serialize_p_idx_val_pre(#p_idx_val{ts=os:timestamp(), dup=Dup, qos=QoS}),
     case incr_ref(Refs, MsgRef) of
@@ -349,12 +396,10 @@ handle_req({write, {MP, _} = SubscriberId,
             %% new message
             Val = serialize_p_msg_val_pre({RoutingKey, Payload}),
             eleveldb:write(Bucket, [{put, MsgKey, Val},
-                                    {put, RefKey, <<>>},
                                     {put, IdxKey, IdxVal}], WriteOpts);
         _ ->
-            %% only write ref
-            eleveldb:write(Bucket, [{put, RefKey, <<>>},
-                                    {put, IdxKey, IdxVal}], WriteOpts)
+            %% only write the idx
+            eleveldb:write(Bucket, [{put, IdxKey, IdxVal}], WriteOpts)
     end;
 handle_req({read, {MP, _} = SubscriberId, MsgRef},
            #state{ref=Bucket, read_opts=ReadOpts}) ->
@@ -378,78 +423,59 @@ handle_req({read, {MP, _} = SubscriberId, MsgRef},
 handle_req({delete, {MP, _} = SubscriberId, MsgRef},
            #state{ref=Bucket, refs=Refs, write_opts=WriteOpts}) ->
     MsgKey = sext:encode({msg, MsgRef, {MP, ''}}),
-    RefKey = sext:encode({msg, MsgRef, SubscriberId}),
     IdxKey = sext:encode({idx, SubscriberId, MsgRef}),
     case decr_ref(Refs, MsgRef) of
         not_found ->
             lager:warning("delete failed ~p due to not found", [MsgRef]);
         0 ->
             %% last one to be deleted
-            eleveldb:write(Bucket, [{delete, RefKey},
-                                    {delete, IdxKey},
+            eleveldb:write(Bucket, [{delete, IdxKey},
                                     {delete, MsgKey}], WriteOpts);
         _ ->
-            %% we have to keep the message, but can delete the ref and idx
-            eleveldb:write(Bucket, [{delete, RefKey},
-                                    {delete, IdxKey}], WriteOpts)
+            %% we have to keep the message, but can delete the idx
+            eleveldb:write(Bucket, [{delete, IdxKey}], WriteOpts)
     end;
-handle_req({find_for_subscriber_id, SubscriberId},
+handle_req({find_for_subscriber_id, TblIdxRef, SubscriberId},
            #state{ref=Bucket, fold_opts=FoldOpts} = State) ->
     {ok, Itr} = eleveldb:iterator(Bucket, FoldOpts),
     FirstIdxKey = sext:encode({idx, SubscriberId, ''}),
     iterate_index_items(eleveldb:iterator_move(Itr, FirstIdxKey),
-                        SubscriberId, ordsets:new(), Itr, State).
+                        TblIdxRef, SubscriberId, Itr, State).
 
-iterate_index_items({error, _}, _, Acc, _, _) ->
+iterate_index_items({error, _}, _,_, _, _) ->
     %% no need to close the iterator
-    Acc;
-iterate_index_items({ok, IdxKey, IdxVal}, SubscriberId, Acc, Itr, State) ->
+    ok;
+iterate_index_items({ok, IdxKey, IdxVal}, TblIdxRef, SubscriberId, Itr, State) ->
     case sext:decode(IdxKey) of
         {idx, SubscriberId, MsgRef} ->
             #p_idx_val{ts=TS} = parse_p_idx_val_pre(IdxVal),
-            iterate_index_items(eleveldb:iterator_move(Itr, prefetch), SubscriberId,
-                                ordsets:add_element({TS, MsgRef}, Acc), Itr, State);
+            Table = select_table(SubscriberId),
+            true = ets:insert(Table, {{TblIdxRef, SubscriberId, TS, MsgRef}}),
+            iterate_index_items(eleveldb:iterator_move(Itr, prefetch), TblIdxRef, SubscriberId, Itr, State);
         _ ->
             %% all message refs accumulated for this subscriber
             eleveldb:iterator_close(Itr),
-            Acc
+            ok
     end.
 
-check_store(#state{ref=Bucket, fold_opts=FoldOpts, write_opts=WriteOpts,
-                   refs=Refs}) ->
-    {ok, Itr} = eleveldb:iterator(Bucket, FoldOpts, keys_only),
-    check_store(Bucket, Refs, eleveldb:iterator_move(Itr, first), Itr, WriteOpts,
-                         {undefined, undefined, true}, 0).
+setup_index(#state{ref=Bucket, fold_opts=FoldOpts, refs=Refs}) ->
+    {ok, Itr} = eleveldb:iterator(Bucket, FoldOpts),
+    FirstIdxKey = sext:encode({idx, '', ''}),
+    setup_index(Refs, eleveldb:iterator_move(Itr, FirstIdxKey), Itr, 0).
 
-check_store(Bucket, Refs, {ok, Key}, Itr, WriteOpts, {PivotMsgRef, PivotMP, HadRefs} = Pivot, N) ->
-    {NewPivot, NewN} =
+setup_index(Refs, {ok, Key, IdxVal}, Itr, N) ->
     case sext:decode(Key) of
-        {msg, PivotMsgRef, {PivotMP, ClientId}} when ClientId =/= '' ->
-            %% Inside the 'same' Message Section. This means we have found refs
-            %% for this message -> no delete required.
-            {{PivotMsgRef, PivotMP, true}, N};
-        {msg, NewPivotMsgRef, {NewPivotMP, ''}} when HadRefs ->
-            %% New Message Section started, previous section included refs
-            %% -> no delete required
-            {{NewPivotMsgRef, NewPivotMP, false}, N}; %% challenge the new message
-        {msg, NewPivotMsgRef, {NewPivotMP, ''}} -> % HadRefs == false
-            %% New Message Section started, previous section didn't include refs
-            %% -> delete required
-            eleveldb:write(Bucket, [{delete, Key}], WriteOpts),
-            {{NewPivotMsgRef, NewPivotMP, false}, N + 1}; %% challenge the new message
-        {idx, _, MsgRef} ->
+        {idx, SubscriberId, MsgRef} ->
+            #p_idx_val{ts=TS} = parse_p_idx_val_pre(IdxVal),
+            Table = select_table(SubscriberId),
+            true = ets:insert(Table, {{init, SubscriberId, TS, MsgRef}}),
             incr_ref(Refs, MsgRef),
-            {Pivot, N};
-        Entry ->
-            lager:warning("inconsistent message store entry detected: ~p", [Entry]),
-            {Pivot, N}
-    end,
-    check_store(Bucket, Refs, eleveldb:iterator_move(Itr, next), Itr, WriteOpts, NewPivot, NewN);
-check_store(Bucket, _, {error, invalid_iterator}, _, WriteOpts, {PivotMsgRef, PivotMP, false}, N) ->
-    Key = sext:encode({msg, PivotMsgRef, {PivotMP, ''}}),
-    eleveldb:write(Bucket, [{delete, Key}], WriteOpts),
-    N + 1;
-check_store(_Bucket, _, {error, invalid_iterator}, _, _, {_, _, true}, N) ->
+            setup_index(Refs, eleveldb:iterator_move(Itr, next), Itr, N + 1);
+        _ ->
+            eleveldb:iterator_close(Itr),
+            N
+    end;
+setup_index(_Refs, {error, invalid_iterator}, _Itr, N) ->
     N.
 
 incr_ref(Refs, MsgRef) ->
@@ -470,6 +496,9 @@ decr_ref(Refs, MsgRef) ->
         _:_ ->
             not_found
     end.
+
+select_table(SubscriberId) ->
+    persistent_term:get({?TBL_MSG_INIT, erlang:phash2(SubscriberId, ?NR_OF_BUCKETS) + 1}).
 
 %% pre version idx:
 %% {p_idx_val, ts, dup, qos}

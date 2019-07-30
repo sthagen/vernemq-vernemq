@@ -19,7 +19,6 @@
 -module(vmq_tracer).
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("vmq_commons/include/vmq_types.hrl").
--include_lib("vmq_commons/include/vmq_types_mqtt5.hrl").
 
 -behaviour(gen_server).
 
@@ -576,9 +575,10 @@ format_lwt(Retain, _QoS, _Topic, _Msg, _Props, _Opts)
   when Retain =:= undefined ->
     [];
 format_lwt(Retain, QoS, Topic, Msg, Props, #{payload_limit := Limit} = Opts) ->
-    {"    with LWT(wr: ~p, wq: ~p, wt: ~s) with payload:~n"
+    [{"    with LWT(wr: ~p, wq: ~p, wt: ~s) with payload:~n"
      "    ~s~n",
-     [Retain, QoS, jtopic(Topic), trunc_payload(Msg, Limit), format_props(Props, Opts)]}.
+      [Retain, QoS, jtopic(Topic), trunc_payload(Msg, Limit)]},
+     format_props(Props, Opts)].
 
 format_frame_(#mqtt_pingreq{}, _) ->
     {"PINGREQ()~n", []};

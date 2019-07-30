@@ -18,7 +18,9 @@
 -behaviour(on_config_change_hook).
 
 %% API
--export([start_link/0]).
+-export([start_link/0,
+         bridge_info/0,
+         metrics/0]).
 -export([change_config/1]).
 
 %% Supervisor callbacks
@@ -34,6 +36,30 @@
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+
+bridge_info() ->
+    lists:map(
+      fun({{_, Host, Port}, Pid, _, _}) ->
+              case vmq_bridge:info(Pid) of
+                  {error, not_started} ->
+                      #{host => Host,
+                        port => Port,
+                        out_buffer_size => $-,
+                        out_buffer_max_size => $-,
+                        out_buffer_dropped => $-
+                       };
+                  {ok, #{out_queue_size := Size,
+                         out_queue_max_size := Max,
+                         out_queue_dropped := Dropped}} ->
+                      #{host => Host,
+                        port => Port,
+                        out_buffer_size => Size,
+                        out_buffer_max_size => Max,
+                        out_buffer_dropped => Dropped
+                       }
+              end
+      end,
+      supervisor:which_children(vmq_bridge_sup)).
 %% ===================================================================
 %% Supervisor callbacks
 %% ===================================================================
@@ -94,6 +120,7 @@ stop_and_delete_unused(Bridges, Config) ->
                   end, BridgesToDelete).
 
 stop_bridge(Ref) ->
+    ets:delete(vmq_bridge_meta, Ref),
     supervisor:terminate_child(?MODULE, Ref),
     supervisor:delete_child(?MODULE, Ref).
 
@@ -101,4 +128,17 @@ ref(Host, Port) ->
     {vmq_bridge, Host, Port}.
 
 init([]) ->
+    vmq_bridge_meta = ets:new(vmq_bridge_meta, [named_table,set,public]),
     {ok, { {one_for_one, 5, 10}, []}}.
+
+metrics() ->
+    ets:foldl(
+      fun({ClientPid},Acc) ->
+              case gen_mqtt_client:stats(ClientPid) of
+                  undefined ->
+                      ets:delete(vmq_bridge_meta, ClientPid),
+                      Acc;
+                  #{dropped := Dropped} ->
+                      [{counter, [], {vmq_bridge_queue_drop, ClientPid}, vmq_bridge_dropped_msgs, "The number of dropped messages (queue full)", Dropped}|Acc]
+              end
+      end, [], vmq_bridge_meta).

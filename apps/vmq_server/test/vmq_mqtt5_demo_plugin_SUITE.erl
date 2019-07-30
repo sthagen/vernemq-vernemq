@@ -4,7 +4,7 @@
 -compile(nowarn_export_all).
 
 -include_lib("common_test/include/ct.hrl").
--include_lib("vmq_commons/include/vmq_types_mqtt5.hrl").
+-include_lib("vmq_commons/include/vmq_types.hrl").
 
 init_per_suite(Config) ->
     vmq_test_utils:setup(),
@@ -35,11 +35,18 @@ groups() ->
     ConnectTests =
     [
      connack_error_with_reason_string,
+     connack_error_use_another_server,
+     connack_error_server_moved,
+     connack_broker_capabilities,
+     publish_modify_props,
+     publish_remove_props,
      puback_error_with_reason_string,
      pubrec_error_with_reason_string,
      suback_with_properties,
      unsuback_with_properties,
-     auth_with_properties
+     auth_with_properties,
+     remove_props_on_deliver_m5,
+     modify_props_on_deliver_m5
     ],
     [
      {mqtt, [shuffle, parallel], ConnectTests}
@@ -55,6 +62,119 @@ connack_error_with_reason_string(Cfg) ->
                                       <<"You have exceeded your quota">>}}
         = Connack,
     ok = gen_tcp:close(Socket).
+
+connack_error_use_another_server(Cfg) ->
+    ClientId = vmq_cth:ustr(Cfg),
+    Connect = packetv5:gen_connect(ClientId, [{username, <<"use_another_server">>}]),
+    {ok, Socket, Connack, <<>>} = packetv5:do_client_connect(Connect, []),
+    #mqtt5_connack{session_present = 0,
+                   reason_code = ?M5_USE_ANOTHER_SERVER,
+                   properties = #{?P_SERVER_REF :=
+                                      <<"server_ref">>}}
+        = Connack,
+    ok = gen_tcp:close(Socket).
+
+connack_error_server_moved(Cfg) ->
+    ClientId = vmq_cth:ustr(Cfg),
+    Connect = packetv5:gen_connect(ClientId, [{username, <<"server_moved">>}]),
+    {ok, Socket, Connack, <<>>} = packetv5:do_client_connect(Connect, []),
+    #mqtt5_connack{session_present = 0,
+                   reason_code = ?M5_SERVER_MOVED,
+                   properties = #{?P_SERVER_REF :=
+                                      <<"server_ref">>}}
+        = Connack,
+    ok = gen_tcp:close(Socket).
+
+connack_broker_capabilities(Cfg) ->
+    ClientId = vmq_cth:ustr(Cfg),
+    Connect = packetv5:gen_connect(ClientId, [{username, <<"broker_capabilities">>}]),
+    {ok, Socket, Connack, <<>>} = packetv5:do_client_connect(Connect, []),
+    #mqtt5_connack{reason_code = ?M5_SUCCESS,
+                   properties = #{?P_MAX_QOS := 0,
+                                  ?P_RETAIN_AVAILABLE := false,
+                                  ?P_WILDCARD_SUBS_AVAILABLE := false,
+                                  ?P_SUB_IDS_AVAILABLE := false,
+                                  ?P_SHARED_SUBS_AVAILABLE := false}}
+        = Connack,
+    ok = gen_tcp:close(Socket).
+
+publish_modify_props(Cfg) ->
+    PubClientId = vmq_cth:ustr(Cfg) ++ "-pub",
+    SubClientId = vmq_cth:ustr(Cfg) ++ "-sub",
+    PubConnect = packetv5:gen_connect(PubClientId, [{username, <<"modify_props">>}]),
+    SubConnect = packetv5:gen_connect(SubClientId, []),
+    Connack = packetv5:gen_connack(),
+    Topic = vmq_cth:ustr(Cfg),
+    Publish = packetv5:gen_publish(Topic, 0, <<"message">>,
+                                   [{properties,
+                                     #{p_user_property =>
+                                           [{<<"k1">>, <<"v1">>},
+                                            {<<"k2">>, <<"v2">>}],
+                                       p_correlation_data => <<"correlation_data">>,
+                                       p_response_topic => [<<"response">>,<<"topic">>]}}]),
+    Subscribe = packetv5:gen_subscribe(6, [packetv5:gen_subtopic(Topic, 0)], #{}),
+    Suback = packetv5:gen_suback(6, [0], #{}),
+
+    {ok, PubSocket} = packetv5:do_client_connect(PubConnect, Connack, []),
+    {ok, SubSocket} = packetv5:do_client_connect(SubConnect, Connack, []),
+
+    ok = gen_tcp:send(SubSocket, Subscribe),
+    ok = packetv5:expect_frame(SubSocket, Suback),
+
+    ok = gen_tcp:send(PubSocket, Publish),
+    ok = gen_tcp:close(PubSocket),
+
+    {ok, RecvPub, <<>>} = packetv5:receive_frame(SubSocket),
+    #mqtt5_publish{topic = _,
+                   qos = 0,
+                   properties = #{p_user_property := GotUserProps,
+                                  p_correlation_data := <<"modified_correlation_data">>,
+                                  p_response_topic := <<"modified_response/topic">>},
+                   payload = <<"message">>} = RecvPub,
+
+    ExpUserProps = #{<<"k1">> => <<"v1">>,
+                     <<"k2">> => <<"v2">>,
+                     <<"added">> => <<"user_property">>},
+    ExpUserProps = maps:from_list(GotUserProps).
+
+publish_remove_props(Cfg) ->
+    PubClientId = vmq_cth:ustr(Cfg) ++ "-pub",
+    SubClientId = vmq_cth:ustr(Cfg) ++ "-sub",
+    PubConnect = packetv5:gen_connect(PubClientId, [{username, <<"remove_props">>}]),
+    SubConnect = packetv5:gen_connect(SubClientId, []),
+    Connack = packetv5:gen_connack(),
+    Topic = vmq_cth:ustr(Cfg),
+    Publish = packetv5:gen_publish(Topic, 0, <<"message">>,
+                                   [{properties,
+                                     #{p_user_property =>
+                                           [{<<"k1">>, <<"v1">>},
+                                            {<<"k2">>, <<"v2">>}],
+                                       p_correlation_data => <<"correlation_data">>,
+                                       p_response_topic => [<<"response">>,<<"topic">>]}}]),
+    Subscribe = packetv5:gen_subscribe(6, [packetv5:gen_subtopic(Topic, 0)], #{}),
+    Suback = packetv5:gen_suback(6, [0], #{}),
+
+    {ok, PubSocket} = packetv5:do_client_connect(PubConnect, Connack, []),
+    {ok, SubSocket} = packetv5:do_client_connect(SubConnect, Connack, []),
+
+    ok = gen_tcp:send(SubSocket, Subscribe),
+    ok = packetv5:expect_frame(SubSocket, Suback),
+
+    ok = gen_tcp:send(PubSocket, Publish),
+    ok = gen_tcp:close(PubSocket),
+
+    {ok, RecvPub, <<>>} = packetv5:receive_frame(SubSocket),
+    #mqtt5_publish{topic = _,
+                   qos = 0,
+                   properties = Props,
+                   payload = <<"message">>} = RecvPub,
+
+    case map_size(Props) of
+        0 ->
+            ok;
+        _ ->
+            throw({expected_no_properties, Props})
+    end.
 
 puback_error_with_reason_string(Cfg) ->
     ClientId = vmq_cth:ustr(Cfg),
@@ -147,8 +267,90 @@ auth_with_properties(Cfg) ->
                                        ?P_AUTHENTICATION_DATA => <<"baddata">>}),
     DisconnectWrongAuth =
         packetv5:gen_disconnect(?M5_NOT_AUTHORIZED,
-                                #{?P_REASON_STRING =>
-                                      <<"Bad authentication data: baddata">>}),
+                                #{?P_REASON_STRING => <<"Bad authentication data: baddata">>}),
     ok = gen_tcp:send(Socket, AuthOutWrong),
     ok = packetv5:expect_frame(Socket, DisconnectWrongAuth),
     {error, closed} = gen_tcp:recv(Socket, 0, 100).
+
+
+modify_props_on_deliver_m5(Cfg) ->
+    Username = <<"modify_props_on_deliver_m5">>,
+    PubClientId = vmq_cth:ustr(Cfg) ++ "-pub",
+    SubClientId = vmq_cth:ustr(Cfg) ++ "-sub",
+    PubConnect = packetv5:gen_connect(PubClientId, []),
+    SubConnect = packetv5:gen_connect(SubClientId, [{username, Username}]),
+    Connack = packetv5:gen_connack(),
+    Topic = vmq_cth:ustr(Cfg),
+    Publish = packetv5:gen_publish(Topic, 0, <<"message">>,
+                                   [{properties,
+                                     #{
+                                       ?P_PAYLOAD_FORMAT_INDICATOR => unspecified,
+                                       ?P_CONTENT_TYPE => <<"type1">>,
+                                       p_user_property => [{<<"k1">>, <<"v1">>}],
+                                       p_correlation_data => <<"correlation_data">>,
+                                       p_response_topic => [<<"response">>,<<"topic">>]}}]),
+    Subscribe = packetv5:gen_subscribe(6, [packetv5:gen_subtopic(Topic, 0)], #{}),
+    Suback = packetv5:gen_suback(6, [0], #{}),
+
+    {ok, PubSocket} = packetv5:do_client_connect(PubConnect, Connack, []),
+    {ok, SubSocket} = packetv5:do_client_connect(SubConnect, Connack, []),
+
+    ok = gen_tcp:send(SubSocket, Subscribe),
+    ok = packetv5:expect_frame(SubSocket, Suback),
+
+    ok = gen_tcp:send(PubSocket, Publish),
+    ok = gen_tcp:close(PubSocket),
+
+    {ok, RecvPub, <<>>} = packetv5:receive_frame(SubSocket),
+    #mqtt5_publish{topic = _,
+                   qos = 0,
+                   properties = #{?P_PAYLOAD_FORMAT_INDICATOR := utf8,
+                                  ?P_CONTENT_TYPE := <<"type2">>,
+                                  p_user_property := GotUserProps,
+                                  p_correlation_data := <<"modified_correlation_data">>,
+                                  p_response_topic := <<"modified_response/topic">>},
+                   payload = <<"message">>} = RecvPub,
+
+    ExpUserProps = #{<<"k1">> => <<"v1">>,
+                     <<"added">> => <<"user_property">>},
+    ExpUserProps = maps:from_list(GotUserProps).
+
+remove_props_on_deliver_m5(Cfg) ->
+    Username = <<"remove_props_on_deliver_m5">>,
+    PubClientId = vmq_cth:ustr(Cfg) ++ "-pub",
+    SubClientId = vmq_cth:ustr(Cfg) ++ "-sub",
+    PubConnect = packetv5:gen_connect(PubClientId, []),
+    SubConnect = packetv5:gen_connect(SubClientId, [{username, Username}]),
+    Connack = packetv5:gen_connack(),
+    Topic = vmq_cth:ustr(Cfg),
+    Publish = packetv5:gen_publish(Topic, 0, <<"message">>,
+                                   [{properties,
+                                     #{?P_PAYLOAD_FORMAT_INDICATOR => unspecified,
+                                       ?P_CONTENT_TYPE => <<"sometype">>,
+                                       p_user_property => [{<<"k1">>, <<"v1">>}],
+                                       p_correlation_data => <<"correlation_data">>,
+                                       p_response_topic => [<<"response">>,<<"topic">>]}}]),
+    Subscribe = packetv5:gen_subscribe(6, [packetv5:gen_subtopic(Topic, 0)], #{}),
+    Suback = packetv5:gen_suback(6, [0], #{}),
+
+    {ok, PubSocket} = packetv5:do_client_connect(PubConnect, Connack, []),
+    {ok, SubSocket} = packetv5:do_client_connect(SubConnect, Connack, []),
+
+    ok = gen_tcp:send(SubSocket, Subscribe),
+    ok = packetv5:expect_frame(SubSocket, Suback),
+
+    ok = gen_tcp:send(PubSocket, Publish),
+    ok = gen_tcp:close(PubSocket),
+
+    {ok, RecvPub, <<>>} = packetv5:receive_frame(SubSocket),
+    #mqtt5_publish{topic = _,
+                   qos = 0,
+                   properties = Props,
+                   payload = <<"message">>} = RecvPub,
+
+    case map_size(Props) of
+        0 ->
+            ok;
+        _ ->
+            throw({expected_no_properties, Props})
+    end.

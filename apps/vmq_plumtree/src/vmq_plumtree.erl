@@ -13,6 +13,8 @@
 %% limitations under the License.
 
 -module(vmq_plumtree).
+-export([start/0, stop/0]).
+
 -export([metadata_put/3,
          metadata_get/2,
          metadata_delete/2,
@@ -29,6 +31,14 @@
 
 
 -define(TOMBSTONE, '$deleted').
+
+start() ->
+    application:ensure_all_started(vmq_plumtree).
+
+stop() ->
+    application:stop(vmq_plumtree),
+    application:stop(plumtree),
+    application:stop(eleveldb).
 
 cluster_join(DiscoveryNode) ->
     plumtree_peer_service:join(DiscoveryNode).
@@ -47,6 +57,7 @@ cluster_leave(Node) ->
             Local2List = riak_dt_orswot:value(Local2),
             case [P || P <- Local2List, P =:= Node] of
                 [] ->
+                    plumtree_peer_service_manager:delete_state(),
                     ok;
                 _ ->
                     cluster_leave(Node)

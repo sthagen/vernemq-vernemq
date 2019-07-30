@@ -1,6 +1,6 @@
 # VerneMQ: A Distributed MQTT Broker
 
-[![Build Status](https://travis-ci.org/erlio/vernemq.svg?branch=master)](https://travis-ci.org/erlio/vernemq)
+[![Build Status](https://travis-ci.org/vernemq/vernemq.svg?branch=master)](https://travis-ci.org/vernemq/vernemq)
 [![Docker Pulls](https://img.shields.io/docker/pulls/erlio/docker-vernemq.svg)](https://hub.docker.com/r/erlio/docker-vernemq/)
 [![Slack Invite](https://slack-invite.vernemq.com/badge.svg)](https://slack-invite.vernemq.com)
 
@@ -71,9 +71,20 @@ The following features are also applies to MQTT 5.0 clients:
 Below you'll find a basic introduction to building and starting VerneMQ. For
 more information about the binary package installation, configuration, and
 administration of VerneMQ, please visit our documentation at [VerneMQ
-Documentation](https://vernemq.com/docs) or checkout the product page
+Documentation](https://docs.vernemq.com) or checkout the product page
 [VerneMQ](https://vernemq.com) if you require more information on the available
 commercial [support options](https://vernemq.com/services.html).
+
+## Community Release Schedule
+
+Next major release: not yet scheduled.
+
+Minor releases: At the end of March, July and November (every 4th month).
+
+Bugfix releases: Usually a bugfix release is released between minor releases or
+if there's an urgent bugfix pending.
+
+Custom release cycles and releases are available for commercial users.
 
 ## Quick Start
 
@@ -82,8 +93,7 @@ started, you need to first build VerneMQ.
 
 ### Building VerneMQ
 
-Note: VerneMQ is compatible with Erlang/OTP 18, 19 and 20 and one of
-these versions is requred to be installed on your system.
+Note: VerneMQ requires Erlang/OTP 21.2 or newer.
 
 Assuming you have a working Erlang installation, building VerneMQ should be as
 simple as:
@@ -107,7 +117,7 @@ If VerneMQ is running it is possible to check the status on
 `http://localhost:8888/status` and it should look something like:
 
 
-<img src="https://i.imgur.com/NAFZml1.png" width="75%">
+<img src="https://i.imgur.com/XajYjtb.png" width="75%">
 
 Note that the `$VERNEMQ/_build/default/rel/vernemq` directory is a complete, 
 self-contained instance of VerneMQ and Erlang. It is strongly suggested that you
@@ -117,6 +127,36 @@ instance.
 ### Important links
 
 * #vernemq on freenode IRC
-* [VerneMQ Documentation](http://vernemq.com/docs) 
+* [VerneMQ Documentation](https://docs.vernemq.com) 
 * [Follow us on Twitter (@vernemq)!](https://twitter.com/vernemq)
 
+## Experimental plugin: `vmq_swc` a more powerful metadata replication algorithm
+
+As of VerneMQ 1.6 an alternative metadata replication algorithm is part of the
+VerneMQ master and can be found in `apps/vmq_swc`. The plugin is in beta stadium
+,but could be already very useful for larger clusters in scenarios with *a lot* 
+of clients. The plugin is part of the official release and could can be enabled
+using `metadata_plugin = vmq_swc` in the `vernemq.conf`. 
+
+### Challenges with Plumtree
+
+VerneMQ uses Plumtree for optimistic replication of the metadata, namely
+subscriber data and retained messages. The Plumtree based metadata storage
+relies on Merkle trees for its anti-entropy mechanism, that is a background
+process that ensures the metadata gets synchronized even in the case an update
+operation was missed. The initialization as well as the ongoing maintenance of
+such Merkle trees are expensive, especially if *a lot* of items are managed by
+the tree. Moreover, removing items from the tree isn't currently supported
+(distributed deletes).  As a consequence one has to look out to not randomly
+generate data (e.g. by random MQTT client ids or random topics used in retained
+messages).
+
+While some of those issues could be solved by improving the way VerneMQ uses Plumtree
+it would most probably break backward compatibility and would have to wait until 2.0.
+For this reason we decided to look at better alternatives, one that scales to millions
+of items, where we could get rid of the Merkle trees, and get a better way to deal with
+distributed deletes. One promising alternative is *Server Wide Clocks (SWC)*. SWC is a
+novel distributed algorithm that provides multiple advantages. Namely a new efficient
+and lightweight anti-entropy mechanism, reduced per-key causality information, and
+*real* distributed deletes. More about the research behind SWC can be found in the
+[scientific paper](https://haslab.uminho.pt/tome/files/global_logical_clocks.pdf).
