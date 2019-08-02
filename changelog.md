@@ -1,5 +1,7 @@
 # Changelog
 
+## VerneMQ 1.9.0
+
 - Ensure mountpoints specified at the protocol level are inherited on the
   specific listeners.
 - Fix missing output from `vernemq version` (#1190).
@@ -51,6 +53,8 @@
   complexity from O(n^2) to O(nlogn) where n is the number of offline messages.
 - Add the ability to modify the `username` on `auth_on_register` and `auth_on_register_m5`
   hooks. Supports both `vmq_diversity` and `vmq_webhooks`.
+- Upgrade the `vmq_diversity` redis driver `eredis` to version 1.2.0.
+- Fix `vmq_diversity` supervisor restart shutdown issue (#1241).
 
 ## VerneMQ 1.8.0
 
