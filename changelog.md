@@ -1,9 +1,16 @@
 # Changelog
 
+## VerneMQ 1.9.1
+
 - Update `cuttlefish` to fix parse issue with lines in the `vernemq.conf` file
   consisting solely of white-space (#1208).
 - Fix bug in the `vmq_webhooks` `auth_on_subscribe_m5` and `on_subscribe_m5`
   hooks (#1280).
+- Fix issue where errors would be logged when the /health endpoint was called
+  (#1281).
+- Ensure MQTT 5.0 subscription identifiers are added to retained messages
+  delivered to the client when the subscription is made (#1287).
+- Fix bug in `vmq_swc` which could prevent VerneMQ from starting up.
 
 ## VerneMQ 1.9.0
 
