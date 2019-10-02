@@ -5,6 +5,13 @@
   now handled and the connection is terminated gracefully (#1317).
 - Fix bug which caused clients MQTT bridges using protocol versions (131 and
   132) to be unable to connect (#1306).
+- Upgrade the `hackney` so VerneMQ is compatible with a TLS change in Erlang/OTP
+  22.1.
+- Fix bug preventing MQTT 5 publish in/out counts from being shown on the HTTP
+  status page.
+- Fix lager issue on Raspberry Pi preventing VerneMQ from starting (#1305).
+- Upgrade `epgsql` dependency to version 4.3.0 to get better error messages
+  (#1336).
 
 ## VerneMQ 1.9.2
 
