@@ -12,6 +12,19 @@
 - Fix lager issue on Raspberry Pi preventing VerneMQ from starting (#1305).
 - Upgrade `epgsql` dependency to version 4.3.0 to get better error messages
   (#1336).
+- Add new `max_last_will_delay` value `client` which means the value from the
+  client is used instead of being overriden by the broker. This `client` value
+  is now the default. This setting only applies to MQTT 5.0 clients.
+- Add hidden option `response_timeout` to `vmq_webhooks` endpoints. With this
+  the time `vmq_webhooks` waits for a response from the remote endpoint can be
+  configured. Default is 5000 milliseconds.
+- Add new `on_deliver/6` and `on_deliver_m5/7` hooks which adds QoS and retained
+  information to the parameters. The old variants are deprecated and will be
+  removed in the next major version.
+- Add new `on_session_expired/1` hook which is called when an offline session
+  expires and the state is deleted.
+- Handle CRL PEM entries with certificates containing empty revocation lists
+  (#1337).
 
 ## VerneMQ 1.9.2
 
