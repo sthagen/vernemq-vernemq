@@ -1,5 +1,7 @@
 # Changelog
 
+## VerneMQ 1.10.0
+
 - Fix bug where websocket MQTT clients that didn't provide a
   `sec-websocket-protocol` header to cause a crash to be logged. This case is
   now handled and the connection is terminated gracefully (#1317).
@@ -42,6 +44,8 @@
 - Enable to define the MQTT protocol version to be used by vmq_bridge (4 or 3).
 - Fix vmq_bridge dynamic configuration handling.
 - Fix multiple minor issues in vmq_swc.
+- Fix HTTP handlers to support parameterized media types.
+- Upgrade lager, poolboy, jsx, luerl dependency.
 
 ## VerneMQ 1.9.2
 
