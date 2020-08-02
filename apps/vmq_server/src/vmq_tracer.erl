@@ -14,8 +14,9 @@
 
 %% @doc This module provides a simple tracing facility for VerneMQ
 %% MQTT sessions. The original inspiration for a session tracer came
-%% from Fred Hebert's fantastic `recon` tool and we gratefully
+%% from Fred Hebert's fantastic `recon' tool and we gratefully
 %% borrowed some small bits and pieces from there.
+%% @end
 -module(vmq_tracer).
 -include_lib("stdlib/include/ms_transform.hrl").
 -include_lib("vmq_commons/include/vmq_types.hrl").
@@ -67,14 +68,7 @@
 %%% API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
-%% @spec start_link() -> {ok, Pid} | ignore | {error, Error}
-%% @end
-%%--------------------------------------------------------------------
-
+-spec start_link(map()) -> {ok, Pid::pid()} | ignore | {error, Error::term()}.
 start_link(Opts) ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, Opts, []).
 
@@ -266,6 +260,7 @@ handle_trace({trace, Pid, return_from, {vmq_plugin,all_till_ok,2}, Ret},
                     tracer = Tracer} = State) ->
     case Ret of
         ok -> State;
+        {ok, Payload} when is_binary(Payload) -> State;
         {ok, Modifiers} ->
             %% The only hook returning a subscriber_id as a modifier
             %% is the `auth_on_register` hook, so it should be fine to

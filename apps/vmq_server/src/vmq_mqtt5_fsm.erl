@@ -25,7 +25,6 @@
 
 -export([msg_ref/0]).
 
--define(CLOSE_AFTER, 5000).
 -define(FC_RECEIVE_MAX, 16#FFFF).
 -define(EXPIRY_INT_MAX, 16#FFFFFFFF).
 -define(MAX_PACKET_SIZE, 16#FFFFFFF).
@@ -582,7 +581,12 @@ connected(#mqtt5_unsubscribe{message_id=MessageId, topics=Topics, properties = P
     _ = vmq_metrics:incr(?MQTT5_UNSUBSCRIBE_RECEIVED),
     OnSuccess =
         fun(_SubscriberId, MaybeChangedTopics) ->
-                vmq_reg:unsubscribe(CAPSettings#cap_settings.allow_unsubscribe, SubscriberId, MaybeChangedTopics)
+                case vmq_reg:unsubscribe(CAPSettings#cap_settings.allow_unsubscribe, SubscriberId, MaybeChangedTopics) of
+                    ok ->
+                        vmq_plugin:all(on_topic_unsubscribed, [SubscriberId, MaybeChangedTopics]),
+                        ok;
+                    V -> V
+                end
         end,
     case unsubscribe(User, SubscriberId, Topics, Props0, OnSuccess) of
         {ok, Props1} ->

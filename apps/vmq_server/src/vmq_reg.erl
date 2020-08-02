@@ -77,7 +77,7 @@ subscribe(false, SubscriberId, Topics) ->
     vmq_cluster:if_ready(fun subscribe_op/2, [SubscriberId, Topics]);
 subscribe(true, SubscriberId, Topics) ->
     %% trade consistency for availability
-    subscribe_op(SubscriberId, Topics).
+    if_ready(fun subscribe_op/2, [SubscriberId, Topics]).
 
 subscribe_op(SubscriberId, Topics) ->
     OldSubs = subscriptions_for_subscriber_id(SubscriberId),
@@ -781,7 +781,7 @@ direct_plugin_exports(LogName, Opts) ->
     PublishFun =
     fun([W|_] = Topic, Payload, Opts_) when is_binary(W)
                                             and is_binary(Payload)
-                                            and is_map(Opts) ->
+                                            and is_map(Opts_) ->
             MaybeWaitTillReady(),
             %% allow a plugin developer to override
             %% - mountpoint
@@ -795,10 +795,10 @@ direct_plugin_exports(LogName, Opts) ->
                      mountpoint=maps:get(mountpoint, Opts_, Mountpoint),
                      payload=Payload,
                      msg_ref=vmq_mqtt_fsm_util:msg_ref(),
-                     qos = maps:get(qos, Opts, 0),
-                     dup=maps:get(dup, Opts, false),
-                     retain=maps:get(retain, Opts, false),
-                     sg_policy=maps:get(shared_subscription_policy, Opts, SGPolicy)
+                     qos = maps:get(qos, Opts_, 0),
+                     dup=maps:get(dup, Opts_, false),
+                     retain=maps:get(retain, Opts_, false),
+                     sg_policy=maps:get(shared_subscription_policy, Opts_, SGPolicy)
                     },
             publish(CAPPublish, RegView, ClientId, Msg)
     end,
@@ -965,3 +965,13 @@ retain_pre(FutureRetain) when is_tuple(FutureRetain),
                               is_integer(element(2, FutureRetain)),
                               element(2, FutureRetain) > ?RETAIN_PRE_V ->
     element(3, FutureRetain).
+
+
+-spec if_ready(_, _) -> any().
+if_ready(Fun, Args) ->
+    case persistent_term:get(subscribe_trie_ready, 0) of
+        1 ->
+            apply(Fun, Args);
+        0 ->
+            {error, not_ready}
+    end.

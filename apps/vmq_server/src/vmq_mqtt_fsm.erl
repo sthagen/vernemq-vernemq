@@ -23,8 +23,6 @@
          msg_in/2,
          info/2]).
 
--define(CLOSE_AFTER, 5000).
-
 -define(IS_PROTO_4(X), X =:= 4; X =:= 132).
 -define(IS_PROTO_3(X), X =:= 3; X =:= 131).
 -define(IS_BRIDGE(X), X =:= 131; X =:= 132).
@@ -124,6 +122,7 @@ init(Peer, Opts, #mqtt_connect{keep_alive=KeepAlive,
     DOpts1 = set_defopt(coordinate_registrations, ?COORDINATE_REGISTRATIONS, DOpts0),
 
     maybe_initiate_trace(ConnectFrame, TraceFun),
+
     set_max_msg_size(MaxMessageSize),
 
     _ = vmq_metrics:incr_mqtt_connect_received(),
@@ -406,7 +405,12 @@ connected(#mqtt_unsubscribe{message_id=MessageId, topics=Topics}, State) ->
     _ = vmq_metrics:incr_mqtt_unsubscribe_received(),
     OnSuccess =
         fun(_SubscriberId, MaybeChangedTopics) ->
-                vmq_reg:unsubscribe(CAPSettings#cap_settings.allow_unsubscribe, SubscriberId, MaybeChangedTopics)
+                case vmq_reg:unsubscribe(CAPSettings#cap_settings.allow_unsubscribe, SubscriberId, MaybeChangedTopics) of
+                    ok ->
+                        vmq_plugin:all(on_topic_unsubscribed, [SubscriberId, MaybeChangedTopics]),
+                        ok;
+                    V -> V
+                end
         end,
     case unsubscribe(User, SubscriberId, Topics, OnSuccess) of
         ok ->
