@@ -55,7 +55,7 @@ end_per_testcase(_, Config) ->
 all() ->
     [
      {group, vmq_storage_engine_leveldb},
-     {group, vmq_storage_engine_dets},
+     %{group, vmq_storage_engine_dets},
      {group, vmq_storage_engine_ets},
      {group, basic}
     ].
@@ -271,7 +271,7 @@ generate_msgs(N, Acc) ->
                    mountpoint = "",
                    dup = random_flag(),
                    qos = random_qos(),
-                   properties=#{},
+                   properties=#{"CorrelationData" => rand_bytes(8)},
                    persisted=true},
     generate_msgs(N - 1, [Msg|Acc]).
 
