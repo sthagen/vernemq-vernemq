@@ -12,7 +12,10 @@
 - Adds support for MongoDB DNS SRV lookup in `vmq_diversity`
 - Adds authentication to MongoDB Lua test script in `vmq_diversity`
 - Adds Docker Compose file for local testing
+- Update `vmq_diversity` to newest Luerl version
 - Bumps `rebar3` executable
+- Upgrade Cowboy dependency to 2.8.0
+- Adds support for `auth_source` in MongoDB connections in `vmq_diversity`
 
 ## VerneMQ 1.11.0
 
