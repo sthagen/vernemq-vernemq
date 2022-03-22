@@ -93,7 +93,7 @@ init(Peer, Opts, #mqtt_connect{keep_alive=KeepAlive,
     SubscriberId = {string:strip(MountPoint, right, $/), undefined},
     AllowedProtocolVersions = proplists:get_value(allowed_protocol_versions,
                                                   Opts),
-
+    AllowAnonymousOverride = proplists:get_value(allow_anonymous_override, Opts),
     PreAuthUser =
     case lists:keyfind(preauth, 1, Opts) of
         false -> undefined;
@@ -130,11 +130,11 @@ init(Peer, Opts, #mqtt_connect{keep_alive=KeepAlive,
     _ = vmq_metrics:incr_mqtt_connect_received(),
     %% the client is allowed "grace" of a half a time period
     set_keepalive_check_timer(KeepAlive),
-
+    AllowAnonymousFinal = AllowAnonymous or AllowAnonymousOverride,
     State = #state{peer=Peer,
                    upgrade_qos=UpgradeQoS,
                    subscriber_id=SubscriberId,
-                   allow_anonymous=AllowAnonymous,
+                   allow_anonymous=AllowAnonymousFinal,
                    shared_subscription_policy=SharedSubPolicy,
                    max_inflight_messages=MaxInflightMsgs,
                    max_message_rate=MaxMessageRate,
@@ -396,7 +396,7 @@ connected(#mqtt_subscribe{message_id=MessageId, topics=Topics},
             _ = vmq_metrics:incr_mqtt_error_auth_subscribe(),
             {State, [Frame]};
         {error, _Reason} ->
-            %% cant subscribe due to overload or netsplit,
+            %% can't subscribe due to overload or netsplit,
             %% Subscribe uses QoS 1 so the client will retry
             _ = vmq_metrics:incr_mqtt_error_subscribe(),
             {State, []}
@@ -420,7 +420,7 @@ connected(#mqtt_unsubscribe{message_id=MessageId, topics=Topics}, State) ->
             _ = vmq_metrics:incr_mqtt_unsuback_sent(),
             {State, [Frame]};
         {error, _Reason} ->
-            %% cant unsubscribe due to overload or netsplit,
+            %% can't unsubscribe due to overload or netsplit,
             %% Unsubscribe uses QoS 1 so the client will retry
             _ = vmq_metrics:incr_mqtt_error_unsubscribe(),
             {State, []}

@@ -118,6 +118,8 @@ init(Peer, Opts, #mqtt5_connect{keep_alive=KeepAlive, properties=Properties,
     SubscriberId = {string:strip(MountPoint, right, $/), undefined},
     AllowedProtocolVersions = proplists:get_value(allowed_protocol_versions,
                                                   Opts),
+    AllowAnonymousOverride = proplists:get_value(allow_anonymous_override, Opts, false),
+
     PreAuthUser =
     case lists:keyfind(preauth, 1, Opts) of
         false -> undefined;
@@ -168,11 +170,11 @@ init(Peer, Opts, #mqtt5_connect{keep_alive=KeepAlive, properties=Properties,
                                   Properties,
                                   vmq_config:get_env(m5_request_problem_information, true)),
     set_request_problem_information(RequestProblemInformation),
-
+    AllowAnonymousFinal = AllowAnonymous or AllowAnonymousOverride,
     State = #state{peer=Peer,
                    upgrade_qos=UpgradeQoS,
                    subscriber_id=SubscriberId,
-                   allow_anonymous=AllowAnonymous,
+                   allow_anonymous=AllowAnonymousFinal,
                    shared_subscription_policy=SharedSubPolicy,
                    max_message_rate=MaxMessageRate,
                    username=PreAuthUser,
@@ -571,7 +573,7 @@ connected(#mqtt5_subscribe{message_id=MessageId, topics=Topics, properties=Props
             _ = vmq_metrics:incr(?MQTT5_SUBSCRIBE_AUTH_ERROR),
             {State, [serialise_frame(Frame)]};
         {error, _Reason} ->
-            %% cant subscribe due to overload or netsplit,
+            %% can't subscribe due to overload or netsplit,
             %% Subscribe uses QoS 1 so the client will retry
             _ = vmq_metrics:incr(?MQTT5_SUBSCRIBE_ERROR),
             {State, []}
@@ -596,7 +598,7 @@ connected(#mqtt5_unsubscribe{message_id=MessageId, topics=Topics, properties = P
             _ = vmq_metrics:incr(?MQTT5_UNSUBACK_SENT),
             {State, [serialise_frame(Frame)]};
         {error, _Reason} ->
-            %% cant unsubscribe due to overload or netsplit,
+            %% can't unsubscribe due to overload or netsplit,
             %% Unsubscribe uses QoS 1 so the client will retry
             _ = vmq_metrics:incr(?MQTT5_UNSUBSCRIBE_ERROR),
             {State, []}
@@ -1037,7 +1039,8 @@ auth_on_register(Password, Props, State) ->
                               ?P_RETAIN_AVAILABLE,
                               ?P_WILDCARD_SUBS_AVAILABLE,
                               ?P_SUB_IDS_AVAILABLE,
-                              ?P_SHARED_SUBS_AVAILABLE], maps:get(properties, Args0,#{})),
+                              ?P_SHARED_SUBS_AVAILABLE,
+                              ?P_RESPONSE_INFO], maps:get(properties, Args0,#{})),
             %% for efficiency reason the max_message_size isn't kept in the state
             set_max_incoming_msg_size(prop_val(max_message_size, Args, max_incoming_msg_size())),
             set_max_outgoing_msg_size(prop_val(max_packet_size, Args, max_outgoing_msg_size())),
