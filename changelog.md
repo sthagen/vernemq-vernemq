@@ -1,3 +1,10 @@
+- Bugfix: Websocket returned error 500 and wrote to log, instead of returning 426 (protocol upgrade) #1983 
+- Allow to specify a maximum connection lifetime (per listener). The lifetime can be overwriten by on_register hooks.
+- Improve TLSv1.3 support (Documentation, CLI, Testsuite)
+- Improve HTTP/2 support for HTTPS listeners (#2117)
+- Make Redis username configurable in vmq_diversity.
+- Enable v5 protocol for WS and SSL listeners as a default.
+- Fix dev_n builds (make dev0 dev1...).
 - Fix issue [#2078](https://github.com/vernemq/vernemq/issues/2008) where the default MQTT listener fails to create in `vernemq.conf`.
 - Fix configuration problems when using Unix Domain Sockets.
 - Add support for compilation in ARM architectures (Tested on M1 Mac and Raspberry PI). Now we can use the `make rel` target to build a VerneMQ release for RaspberryPI.
