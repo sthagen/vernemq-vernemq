@@ -1,3 +1,7 @@
+- Update clique and plumtree dependencies
+- Update luerl dependency to 1.2.0
+- New feature: max_header_value_length option, solves #2267
+
 ## VerneMQ 2.0.0
 
 - New feature: Synchronized wait for retained message store
