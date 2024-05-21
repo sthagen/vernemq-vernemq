@@ -120,7 +120,7 @@ variable(
     <<?PUBLISH:4, Dup:1, QoS:2, Retain:1>>,
     <<TopicLen:16/big, Topic:TopicLen/binary, MessageId:16/big, Rest/binary>>
 ) when
-    QoS < 3
+    QoS < 3, MessageId > 0
 ->
     case validate_publish_topic(Topic) of
         {ok, ParsedTopic} ->
@@ -304,7 +304,7 @@ variable(
         Flags:6/bitstring, CleanStart:1, 0:1, KeepAlive:16/big, Rest0/binary>>
 ) ->
     %% The properties are the last element of the variable header.
-    case parse_properties(Rest0, ?allowedConnectProps) of
+    case parse_connect_properties(Rest0, ?allowedConnectProps) of
         {ok, Properties, Rest1} ->
             %% Parse the payload.
             case Rest1 of
@@ -833,7 +833,7 @@ gen_connack(SP, RC, Properties) ->
 
 gen_publish(Topic, Qos, Payload, Opts) ->
     Frame = #mqtt5_publish{
-        message_id = proplists:get_value(mid, Opts, 0),
+        message_id = proplists:get_value(mid, Opts, 1),
         topic = ensure_binary(Topic),
         qos = Qos,
         retain = proplists:get_value(retain, Opts, false),
@@ -942,6 +942,25 @@ gen_auth(RC, Properties) ->
             }
         )
     ).
+
+-spec parse_connect_properties(binary(), list()) ->
+    {ok, map(), binary()}
+    | {error, any()}.
+parse_connect_properties(Data, AllowedProps) ->
+    case parse_properties(Data, AllowedProps) of
+        {ok, Properties, Rest1} when is_map(Properties) ->
+            case
+                {
+                    maps:is_key(p_authentication_data, Properties),
+                    maps:is_key(p_authentication_method, Properties)
+                }
+            of
+                {true, false} -> {error, authentication_data_without_authentication_method};
+                _ -> {ok, Properties, Rest1}
+            end;
+        E ->
+            E
+    end.
 
 -spec parse_properties(binary(), list()) ->
     {ok, map(), binary()}
