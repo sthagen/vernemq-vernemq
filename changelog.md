@@ -1,7 +1,12 @@
-- Logging: Rejected/failed Subscribes are now logged as errors with SubscribedId and Peer info
-- Bugfix: MQTT Session FSMs now send out SUBACKs for any error clause
+## VerneMQ 2.1.2
+
+- HTTP status page: Full-page container for improved status page view - especially helpful on wider monitors.
+- XFF/WebSockets: Adapt the XFF trusted proxy validation to check against proxy IP, not last peer in XFF header.
+- vmq_reg_trie: Move from genserver2 to genserver for improved memory management.
+- Logging: Rejected/failed Subscribes are now logged as errors with SubscriberId and Peer info.
+- Bugfix: MQTT Session FSMs now send out SUBACKs for any error clause.
 - Enhancement: Don't log msg payload in pubauth errors.
-- Bugfix: active connections count for WS in metrics and listener info
+- Bugfix: active connections count for WS in metrics and listener info.
 
 
 ## VerneMQ 2.1.1
@@ -114,7 +119,6 @@
 - 'vmq_http_pub': Allow anonymous access (allow_anonymous = on)
 - New feature: Add configuration option disconnect_on_unauthorized_publish_v3 to force disconnect on unauthorized publish even for MQTT clients before v3.1.1
 - New feature: Add persistent message queueing functionality to `vmq_bridge` Plugin, using [ReplayQ](https://github.com/emqx/replayq)
-
 
 ## VerneMQ 1.13.0
 
