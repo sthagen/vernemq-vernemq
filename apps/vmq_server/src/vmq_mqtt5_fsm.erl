@@ -19,6 +19,9 @@
 -include_lib("kernel/include/logger.hrl").
 -include("vmq_server.hrl").
 -include("vmq_metrics.hrl").
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
 -export([
     init/3,
@@ -68,6 +71,11 @@
         | username()
         | {preauth, string() | undefined},
     conn_opts :: undefined | map(),
+    auth_plugins = undefined :: undefined | [atom()],
+    authz_plugins = undefined :: undefined | [atom()],
+    listener_addr :: undefined | tuple() | {local, string()},
+    listener_port :: undefined | non_neg_integer(),
+    listener_type :: undefined | atom(),
     keep_alive :: undefined | non_neg_integer(),
     keep_alive_tref :: undefined | reference(),
     clean_start = false :: flag(),
@@ -154,6 +162,11 @@ init(
             {_, PreAuth} -> {preauth, PreAuth}
         end,
     ConnOpts = proplists:get_value(conn_opts, Opts, undefined),
+    AuthPlugins = proplists:get_value(auth_plugins, Opts, undefined),
+    AuthzPlugins = proplists:get_value(authz_plugins, Opts, undefined),
+    ListenerAddr = proplists:get_value(listener_addr, Opts, undefined),
+    ListenerPort = proplists:get_value(listener_port, Opts, undefined),
+    ListenerType = proplists:get_value(listener_type, Opts, undefined),
     AllowAnonymous = vmq_config:get_env(allow_anonymous, false),
     SharedSubPolicy = vmq_config:get_env(shared_subscription_policy, prefer_local),
     MaxClientIdSize = vmq_config:get_env(max_client_id_size, 23),
@@ -212,6 +225,11 @@ init(
         max_message_rate = MaxMessageRate,
         username = PreAuthUser,
         conn_opts = ConnOpts,
+        auth_plugins = AuthPlugins,
+        authz_plugins = AuthzPlugins,
+        listener_addr = ListenerAddr,
+        listener_port = ListenerPort,
+        listener_type = ListenerType,
         max_client_id_size = MaxClientIdSize,
         keep_alive = KeepAlive,
         keep_alive_tref = undefined,
@@ -253,6 +271,23 @@ data_in(Data, SessionState, OutAcc) ->
             E;
         {error, Reason} ->
             {error, Reason, lists:reverse(OutAcc)};
+        {{error, Reason}, _Rest} ->
+            %% The parser embeds frame-level validation errors (e.g. an
+            %% invalid wildcard in a SUBSCRIBE topic filter) as the "frame"
+            %% of a {Frame, Rest} tuple, so they never reach the state
+            %% machine as a real frame. Handle them here as protocol errors
+            %% instead of feeding the error term to the FSM as an unexpected
+            %% message. For an established session we inform the client with
+            %% a DISCONNECT carrying an appropriate reason code; a DISCONNECT
+            %% must not precede the CONNACK, so in any other session state we
+            %% just close the connection.
+            case SessionState of
+                {connected, State} ->
+                    {stop, StopReason, Out} = terminate(frame_error_rcn(Reason), State),
+                    {stop, StopReason, lists:reverse([Out | OutAcc])};
+                _ ->
+                    {error, Reason, lists:reverse(OutAcc)}
+            end;
         {Frame, Rest} ->
             case in(Frame, SessionState, true) of
                 {stop, Reason, Out} ->
@@ -403,7 +438,7 @@ pre_connect_auth(
             )
         end,
     _ = vmq_metrics:incr({?MQTT5_AUTH_RECEIVED, rc2rcn(RC)}),
-    case vmq_plugin:all_till_ok(on_auth_m5, [UserName, SubscriberId, Props]) of
+    case plugin_all_till_ok_auth(on_auth_m5, [UserName, SubscriberId, Props], State) of
         {ok, #{
             reason_code := ?SUCCESS,
             properties := #{?P_AUTHENTICATION_METHOD := AuthMethod} = Res
@@ -664,13 +699,14 @@ connected(#mqtt5_subscribe{message_id = MessageId, topics = Topics, properties =
                     CAPSettings#cap_settings.allow_subscribe, SubscriberId, MaybeChangedTopics
                 )
             of
-                {ok, _QoSs} ->
-                    vmq_plugin:all(on_subscribe_m5, [User, SubscriberId, MaybeChangedTopics, Props1]);
+                {ok, QoSs} ->
+                    vmq_plugin:all(on_subscribe_m5, [User, SubscriberId, MaybeChangedTopics, Props1]),
+                    {ok, replace_subscribe_qos(MaybeChangedTopics, QoSs)};
                 Res ->
                     Res
             end
         end,
-    case auth_on_subscribe(User, SubscriberId, SubTopics, Props0, OnAuthSuccess) of
+    case auth_on_subscribe(User, SubscriberId, SubTopics, Props0, OnAuthSuccess, State) of
         {ok, Modifiers} ->
             QoSs = topic_to_qos(maps:get(topics, Modifiers, [])),
             Props1 = maps:with(
@@ -763,7 +799,7 @@ connected(
             )
         end,
     _ = vmq_metrics:incr({?MQTT5_AUTH_RECEIVED, rc2rcn(RC)}),
-    case vmq_plugin:all_till_ok(on_auth_m5, [UserName, SubscriberId, Props]) of
+    case plugin_all_till_ok_auth(on_auth_m5, [UserName, SubscriberId, Props], State) of
         {ok, #{
             reason_code := ?SUCCESS,
             properties :=
@@ -996,7 +1032,7 @@ check_enhanced_auth(
                 M
             )
         end,
-    case vmq_plugin:all_till_ok(on_auth_m5, [UserName, SubscriberId, Props]) of
+    case plugin_all_till_ok_auth(on_auth_m5, [UserName, SubscriberId, Props], State) of
         {ok, #{
             reason_code := ?SUCCESS,
             properties :=
@@ -1271,7 +1307,8 @@ maybe_apply_topic_alias_in(
                     User,
                     SubscriberId,
                     remove_property(p_topic_alias, Msg#vmq_msg{routing_key = AliasedTopic}),
-                    Fun
+                    Fun,
+                    State
                 )
             of
                 {ok, NewMsg, SessCtrl} ->
@@ -1291,7 +1328,7 @@ maybe_apply_topic_alias_in(
     Fun,
     #state{topic_aliases_in = TA} = State
 ) ->
-    case auth_on_publish(User, SubscriberId, remove_property(p_topic_alias, Msg), Fun) of
+    case auth_on_publish(User, SubscriberId, remove_property(p_topic_alias, Msg), Fun, State) of
         {ok, #vmq_msg{routing_key = MaybeChangedTopic} = NewMsg, SessCtrl} ->
             %% TODOv5: Should we check here that the topic isn't empty?
             {ok, NewMsg, SessCtrl, State#state{
@@ -1319,7 +1356,7 @@ maybe_apply_topic_alias_in(
     State
 ) ->
     %% normal publish
-    case auth_on_publish(User, SubscriberId, remove_property(p_topic_alias, Msg), Fun) of
+    case auth_on_publish(User, SubscriberId, remove_property(p_topic_alias, Msg), Fun, State) of
         {ok, NewMsg, SessCtrl} ->
             {ok, NewMsg, SessCtrl, State};
         {error, _} = E ->
@@ -1363,15 +1400,15 @@ auth_on_register(Password, Props, State) ->
         cap_settings = CAPSettings,
         subscriber_id = SubscriberId,
         username = User,
-        conn_opts = ConnOpts
+        conn_opts = ConnOpts,
+        listener_addr = ListenerAddr,
+        listener_port = ListenerPort,
+        listener_type = ListenerType
     } = State,
     BasicHookArgs = [Peer, SubscriberId, User, Password, CleanStart, Props],
-    HookArgs =
-        case ConnOpts of
-            M when is_map(M) -> lists:flatten([BasicHookArgs | [M]]);
-            _ -> BasicHookArgs
-        end,
-    case vmq_plugin:all_till_ok(auth_on_register_m5, HookArgs) of
+    ConnectionMetadata = connection_metadata(ConnOpts, ListenerAddr, ListenerPort, ListenerType),
+    HookArgs = maybe_append_connection_metadata(BasicHookArgs, ConnectionMetadata),
+    case plugin_all_till_ok_auth(auth_on_register_m5, HookArgs, State) of
         ok ->
             {ok, queue_opts([], Props, State), #{}, State};
         {ok, Args0} ->
@@ -1434,6 +1471,28 @@ auth_on_register(Password, Props, State) ->
 set_sock_opts(Opts) ->
     self() ! {set_sock_opts, Opts}.
 
+connection_metadata(ConnOpts, ListenerAddr, ListenerPort, ListenerType) ->
+    Metadata =
+        case ConnOpts of
+            M when is_map(M) -> M;
+            _ -> #{}
+        end,
+    case ListenerAddr of
+        undefined ->
+            Metadata;
+        _ ->
+            Metadata#{
+                listener_addr => ListenerAddr,
+                listener_port => ListenerPort,
+                listener_type => ListenerType
+            }
+    end.
+
+maybe_append_connection_metadata(Args, Metadata) when map_size(Metadata) =:= 0 ->
+    Args;
+maybe_append_connection_metadata(Args, Metadata) ->
+    Args ++ [Metadata].
+
 -spec auth_on_subscribe(
     username(),
     subscriber_id(),
@@ -1441,29 +1500,77 @@ set_sock_opts(Opts) ->
     mqtt5_properties(),
     fun(
         (username(), subscriber_id(), [{topic(), subinfo()}], mqtt5_properties()) ->
-            {ok, [qos() | not_allowed]} | {error, atom()}
-    )
+            {ok, [subscription()]} | {error, atom()}
+    ),
+    state()
 ) ->
     {ok, auth_on_subscribe_m5_hook:sub_modifiers()}
     | {error, atom()}.
-auth_on_subscribe(User, SubscriberId, Topics, Props0, AuthSuccess) ->
+auth_on_subscribe(User, SubscriberId, Topics, Props0, AuthSuccess, State) ->
     case
-        vmq_plugin:all_till_ok(
+        plugin_all_till_ok_authz(
             auth_on_subscribe_m5,
-            [User, SubscriberId, Topics, Props0]
+            [User, SubscriberId, Topics, Props0],
+            State
         )
     of
         ok ->
-            AuthSuccess(User, SubscriberId, Topics, Props0),
-            {ok, #{topics => Topics}};
+            case AuthSuccess(User, SubscriberId, Topics, Props0) of
+                {ok, NewTopics} -> {ok, #{topics => NewTopics}};
+                Res -> Res
+            end;
         {ok, Modifiers} ->
             NewTopics = maps:get(topics, Modifiers, []),
             NewProps = maps:get(properties, Modifiers, #{}),
-            AuthSuccess(User, SubscriberId, NewTopics, NewProps),
-            {ok, Modifiers};
+            auth_on_subscribe_modifiers(
+                User, SubscriberId, NewTopics, NewProps, AuthSuccess, Modifiers
+            );
         {error, Error} ->
             {error, Error}
     end.
+
+auth_on_subscribe_modifiers(User, SubscriberId, Topics, Props, AuthSuccess, Modifiers) ->
+    {AllowedTopics, ReturnCodes} = split_subscribe_topics(Topics),
+    case AllowedTopics of
+        [] ->
+            {ok, Modifiers#{topics => ReturnCodes}};
+        _ ->
+            case AuthSuccess(User, SubscriberId, AllowedTopics, Props) of
+                {ok, AllowedReturnCodes} ->
+                    {ok, Modifiers#{
+                        topics => merge_subscribe_return_codes(ReturnCodes, AllowedReturnCodes)
+                    }};
+                Res ->
+                    Res
+            end
+    end.
+
+split_subscribe_topics(Topics) ->
+    {AllowedTopicsRev, ReturnCodesRev} =
+        lists:foldl(
+            fun
+                ({_Topic, QoS} = TopicQoS, {AllowedAcc, ReturnCodeAcc}) when
+                    QoS =:= 0; QoS =:= 1; QoS =:= 2
+                ->
+                    {[TopicQoS | AllowedAcc], [allowed | ReturnCodeAcc]};
+                ({_Topic, {QoS, SubOpts}} = TopicQoS, {AllowedAcc, ReturnCodeAcc}) when
+                    (QoS =:= 0 orelse QoS =:= 1 orelse QoS =:= 2) andalso is_map(SubOpts)
+                ->
+                    {[TopicQoS | AllowedAcc], [allowed | ReturnCodeAcc]};
+                ({_Topic, _ReturnCode} = TopicReturnCode, {AllowedAcc, ReturnCodeAcc}) ->
+                    {AllowedAcc, [TopicReturnCode | ReturnCodeAcc]}
+            end,
+            {[], []},
+            Topics
+        ),
+    {lists:reverse(AllowedTopicsRev), lists:reverse(ReturnCodesRev)}.
+
+merge_subscribe_return_codes([allowed | Rest], [ReturnCode | AllowedReturnCodes]) ->
+    [ReturnCode | merge_subscribe_return_codes(Rest, AllowedReturnCodes)];
+merge_subscribe_return_codes([ReturnCode | Rest], AllowedReturnCodes) ->
+    [ReturnCode | merge_subscribe_return_codes(Rest, AllowedReturnCodes)];
+merge_subscribe_return_codes([], []) ->
+    [].
 
 -type unsubsuccessfun() ::
     fun((subscriber_id(), [{topic(), qos()}]) -> ok | {error, not_ready}).
@@ -1501,7 +1608,7 @@ unsubscribe(User, SubscriberId, Topics0, Props0, UnsubFun) ->
             {ok, Props2}
     end.
 
--spec auth_on_publish(username(), subscriber_id(), msg(), aop_success_fun()) ->
+-spec auth_on_publish(username(), subscriber_id(), msg(), aop_success_fun(), state()) ->
     {ok, msg()}
     | {ok, msg(), session_ctrl()}
     | {error, atom() | {reason_code_name(), properties()}}.
@@ -1515,10 +1622,11 @@ auth_on_publish(
         retain = IsRetain,
         properties = Properties
     } = Msg,
-    AuthSuccess
+    AuthSuccess,
+    State
 ) ->
     HookArgs = [User, SubscriberId, QoS, Topic, Payload, unflag(IsRetain), Properties],
-    case vmq_plugin:all_till_ok(auth_on_publish_m5, HookArgs) of
+    case plugin_all_till_ok_authz(auth_on_publish_m5, HookArgs, State) of
         ok ->
             AuthSuccess(Msg, HookArgs, #{});
         {ok, Args0} when is_map(Args0) ->
@@ -2210,6 +2318,15 @@ gen_disconnect_(RCN, Props) ->
     _ = vmq_metrics:incr({?MQTT5_DISCONNECT_SENT, RCN}),
     serialise_frame(#mqtt5_disconnect{reason_code = rcn2rc(RCN), properties = Props}).
 
+%% Map a parser frame-validation error to the MQTT 5.0 reason code sent in
+%% the DISCONNECT before the connection is closed.
+-spec frame_error_rcn(atom()) -> reason_code_name().
+frame_error_rcn('no_+_allowed_in_word') -> ?TOPIC_FILTER_INVALID;
+frame_error_rcn('no_#_allowed_in_word') -> ?TOPIC_FILTER_INVALID;
+frame_error_rcn('no_+_allowed_in_publish') -> ?TOPIC_NAME_INVALID;
+frame_error_rcn('no_#_allowed_in_publish') -> ?TOPIC_NAME_INVALID;
+frame_error_rcn(_) -> ?MALFORMED_PACKET.
+
 msg_expiration(#{p_message_expiry_interval := ExpireAfter}) ->
     {expire_after, ExpireAfter};
 msg_expiration(_) ->
@@ -2313,13 +2430,29 @@ get_sub_id(_) ->
 topic_to_qos(Topics) ->
     lists:map(
         fun
+            ({_T, not_allowed}) ->
+                rcn2rc(?NOT_AUTHORIZED);
+            ({_T, quota_exceeded}) ->
+                rcn2rc(?QUOTA_EXCEEDED);
             ({_T, QoS}) when is_integer(QoS) ->
                 QoS;
+            ({_T, {not_allowed, _}}) ->
+                rcn2rc(?NOT_AUTHORIZED);
+            ({_T, {quota_exceeded, _}}) ->
+                rcn2rc(?QUOTA_EXCEEDED);
             ({_T, {QoS, _}}) ->
                 QoS
         end,
         Topics
     ).
+
+replace_subscribe_qos(Topics, QoSs) ->
+    [replace_subscribe_qos_(Topic, QoS) || {Topic, QoS} <- lists:zip(Topics, QoSs)].
+
+replace_subscribe_qos_({T, {_OldQoS, SubOpts}}, QoS) when is_map(SubOpts) ->
+    {T, {QoS, SubOpts}};
+replace_subscribe_qos_({T, _OldQoS}, QoS) ->
+    {T, QoS}.
 
 disconnect_rc2rcn(0) ->
     ?NORMAL_DISCONNECT;
@@ -2342,5 +2475,49 @@ set_defopt(Key, Default, Map) ->
             maps:put(Key, NonDefault, Map)
     end.
 
+plugin_all_till_ok_auth(Hook, HookArgs, #state{auth_plugins = undefined}) ->
+    vmq_plugin:all_till_ok(Hook, HookArgs);
+plugin_all_till_ok_auth(Hook, HookArgs, #state{auth_plugins = Plugins}) ->
+    vmq_plugin:all_till_ok(Hook, HookArgs, Plugins, {error, plugin_chain_exhausted}).
+
+plugin_all_till_ok_authz(Hook, HookArgs, #state{authz_plugins = undefined}) ->
+    vmq_plugin:all_till_ok(Hook, HookArgs);
+plugin_all_till_ok_authz(Hook, HookArgs, #state{authz_plugins = Plugins}) ->
+    vmq_plugin:all_till_ok(Hook, HookArgs, Plugins, {error, plugin_chain_exhausted}).
+
 peertoa({_IP, _Port} = Peer) ->
     vmq_mqtt_fsm_util:peertoa(Peer).
+
+-ifdef(TEST).
+auth_on_subscribe_modifiers_filters_rejected_topics_test() ->
+    User = <<"user">>,
+    SubscriberId = {[], <<"client">>},
+    Props = #{},
+    Allowed = {[<<"rewritten">>], {1, #{no_local => false}}},
+    Rejected = {[<<"forbidden">>], 135},
+    Modifiers = #{topics => [Allowed, Rejected]},
+    AuthSuccess =
+        fun(User0, SubscriberId0, Topics, Props0) ->
+            ?assertEqual(User, User0),
+            ?assertEqual(SubscriberId, SubscriberId0),
+            ?assertEqual(Props, Props0),
+            ?assertEqual([Allowed], Topics),
+            {ok, [{[<<"rewritten">>], {1, #{no_local => false}}}]}
+        end,
+    ?assertEqual(
+        {ok, #{topics => [{[<<"rewritten">>], {1, #{no_local => false}}}, Rejected]}},
+        auth_on_subscribe_modifiers(
+            User, SubscriberId, [Allowed, Rejected], Props, AuthSuccess, Modifiers
+        )
+    ).
+
+auth_on_subscribe_modifiers_all_rejected_test() ->
+    Rejected = {[<<"forbidden">>], 135},
+    AuthSuccess = fun(_, _, _, _) -> error(should_not_subscribe_rejected_topics) end,
+    ?assertEqual(
+        {ok, #{topics => [Rejected]}},
+        auth_on_subscribe_modifiers(
+            <<"user">>, {[], <<"client">>}, [Rejected], #{}, AuthSuccess, #{topics => [Rejected]}
+        )
+    ).
+-endif.

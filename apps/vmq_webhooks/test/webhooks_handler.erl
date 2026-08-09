@@ -26,8 +26,9 @@ start_endpoint_clear(HTTPPort) ->
 
 route() -> cowboy_router:compile(
                  [{'_', [{"/", ?MODULE, []},
-                         {"/cache", ?MODULE, []},
-                         {"/cache1s", ?MODULE, []}]}]).
+                          {"/cache", ?MODULE, []},
+                          {"/cache1s", ?MODULE, []},
+                          {"/slow_chunks", ?MODULE, []}]}]).
 
 stop_endpoint_tls() ->
     cowboy:stop_listener(https).
@@ -59,9 +60,16 @@ init(Req, State) ->
             {Code, Resp} = process_cache_hook(Hook, vmq_json:decode(Body, [{labels, atom}, return_maps])),
             Req2 =
                 cowboy_req:reply(Code,
-                                 #{<<"content-type">> => <<"text/json">>,
-                                   <<"Cache-control">> => <<"max-age=1">>},
-                                 encode(Resp), Req1),
+                                  #{<<"content-type">> => <<"text/json">>,
+                                    <<"Cache-control">> => <<"max-age=1">>},
+                                  encode(Resp), Req1),
+            {ok, Req2, State};
+        <<"/slow_chunks">> ->
+            Req2 = cowboy_req:stream_reply(200, #{<<"content-type">> => <<"text/json">>}, Req1),
+            timer:sleep(60),
+            ok = cowboy_req:stream_body(<<"{\"result\"">>, nofin, Req2),
+            timer:sleep(60),
+            ok = cowboy_req:stream_body(<<":\"ok\"}">>, fin, Req2),
             {ok, Req2, State}
     end.
 
@@ -107,12 +115,40 @@ auth_on_register(#{peer_addr := ?PEER_BIN,
     {200, #{result => <<"ok">>}};
 auth_on_register(#{peer_addr := ?PEER_BIN,
                    peer_port := ?PEERPORT,
+                   client_id := ?LISTENER_INFO_CLIENT_ID,
+                   mountpoint := ?MOUNTPOINT_BIN,
+                   username := ?USERNAME,
+                   password := ?PASSWORD,
+                   clean_session := true,
+                   client_cert := <<"client cert">>,
+                   listener_addr := ?PEER_BIN,
+                   listener_port := 1883,
+                   listener_type := <<"mqtt">>
+                 }) ->
+    {200, #{result => <<"ok">>}};
+auth_on_register(#{peer_addr := ?PEER_BIN,
+                   peer_port := ?PEERPORT,
+                   client_id := ?LISTENER_INFO_UNIX_CLIENT_ID,
+                   mountpoint := ?MOUNTPOINT_BIN,
+                   username := ?USERNAME,
+                   password := ?PASSWORD,
+                   clean_session := true,
+                   listener_addr := <<"local">>,
+                   listener_port := 0,
+                   listener_type := <<"mqtt">>
+                 }) ->
+    {200, #{result => <<"ok">>}};
+auth_on_register(#{peer_addr := ?PEER_BIN,
+                   peer_port := ?PEERPORT,
                    client_id := ?ALLOWED_CLIENT_ID,
                    mountpoint := ?MOUNTPOINT_BIN,
                    username := ?USERNAME,
                    password := ?PASSWORD,
                    clean_session := true
-                 }) ->
+                  }) ->
+    {200, #{result => <<"ok">>}};
+auth_on_register(#{client_id := ?CANCEL_CLIENT_ID}) ->
+    timer:sleep(800),
     {200, #{result => <<"ok">>}};
 auth_on_register(#{client_id := ?NOT_ALLOWED_CLIENT_ID}) ->
     {200, #{result => #{error => <<"not_allowed">>}}};
@@ -130,12 +166,29 @@ auth_on_register(#{subscriberid := <<"internal_server_error">>}) ->
 
 auth_on_register_m5(#{peer_addr := ?PEER_BIN,
                       peer_port := ?PEERPORT,
+                      client_id := ?LISTENER_INFO_CLIENT_ID,
+                      mountpoint := ?MOUNTPOINT_BIN,
+                      username := ?USERNAME,
+                      password := ?PASSWORD,
+                      clean_start := true,
+                      properties := #{},
+                      client_cert := <<"client cert">>,
+                      listener_addr := ?PEER_BIN,
+                      listener_port := 1883,
+                      listener_type := <<"mqtt">>
+                     }) ->
+    {200, #{result => <<"ok">>}};
+auth_on_register_m5(#{peer_addr := ?PEER_BIN,
+                      peer_port := ?PEERPORT,
                       client_id := ?ALLOWED_CLIENT_ID,
                       mountpoint := ?MOUNTPOINT_BIN,
                       username := ?USERNAME,
                       password := ?PASSWORD,
                       clean_start := true
                      }) ->
+    {200, #{result => <<"ok">>}};
+auth_on_register_m5(#{client_id := ?CANCEL_CLIENT_ID_M5}) ->
+    timer:sleep(800),
     {200, #{result => <<"ok">>}};
 auth_on_register_m5(#{client_id := ?NOT_ALLOWED_CLIENT_ID}) ->
     {200, #{result => #{error => <<"not_allowed">>}}};
@@ -549,4 +602,3 @@ process_hook(<<"on_deliver_m5">>, Body) ->
     on_deliver_m5(Body);
 process_hook(<<"on_auth_m5">>, Body) ->
     on_auth_m5(Body).
-

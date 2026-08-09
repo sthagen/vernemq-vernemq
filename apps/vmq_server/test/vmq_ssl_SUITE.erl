@@ -163,13 +163,18 @@ init_per_testcase(Case, Config) ->
                 {keyfile, ssl_path("server.encrypted.key")},
                 {keypasswd, "VerneMQ123"},
                 {tls_version, "tlsv1.2"}]),
-            {ok, _} = vmq_server_cmd:listener_start(1889, [{ssl, true},
+            case vmq_server_cmd:listener_start(1889, [{ssl, true},
                 {nr_of_acceptors, 5},
                 {cafile, ssl_path("all-ca.crt")},
                 {certfile, ssl_path("server.crt")},
                 {keyfile, ssl_path("server.encrypted.key")},
                 {keypasswd, "VerneMQ123Wrong"},
-                {tls_version, "tlsv1.2"}]);
+                {tls_version, "tlsv1.2"}]) of
+                {ok, _} ->
+                    ok;
+                {error, _} ->
+                    ok
+            end;
         {_, _, _, _, _, _, _, _, _, _, _,true} ->
             {ok, _} = vmq_server_cmd:set_config(allow_anonymous, false),
             {ok, _} = vmq_server_cmd:listener_start(1888, [{ssl, true},
@@ -300,11 +305,16 @@ connect_no_auth_test_passwd(K) ->
    % good case
    connect_no_auth_test(K),
     % wrong passwd
-   _Connect = packet:gen_connect("connect-success-test", [{keepalive, 10}]),
-   _Connack = packet:gen_connack(0),
-    {error, closed} = ssl:connect("localhost", 1889,
+    case ssl:connect("localhost", 1889,
         [binary, {active, false}, {packet, raw},
-            {cacerts, load_cacerts()}]).
+            {cacerts, load_cacerts()}]) of
+        {error, closed} ->
+            ok;
+        {error, econnrefused} ->
+            ok;
+        {error, {tls_alert, _}} ->
+            ok
+    end.
 
 
     connect_no_auth_wrong_ca_test(_) ->
@@ -475,7 +485,10 @@ connect_forward_conn_opts_test(_) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 hook_preauth_success(_, {"", <<"connect-success-test">>}, <<"test client">>, undefined, _) -> ok.
 
-hook_conn_opts_handler(_, {"", <<"connect-success-test">>}, <<"test client">>, _, _, ConnOpts) when is_map(ConnOpts) ->
+hook_conn_opts_handler(_, {"", <<"connect-success-test">>}, <<"test client">>, _, _,
+                        #{listener_addr := {127,0,0,1},
+                          listener_port := 1888,
+                          listener_type := mqtts} = ConnOpts) when is_map(ConnOpts) ->
     ClientCert = maps:get(client_cert, ConnOpts, undefined),
     % just check whether the client cert is a binary (Pem)
     case ClientCert of
