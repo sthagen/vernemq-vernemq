@@ -1,3 +1,5 @@
+## VerneMQ 2.2.0
+
 - Dependency: Update Hackney to 4.7.2.
 - vmq_webhooks: Improve webhook request handling by supporting cancellable auth webhook calls.
 - Adapt vmq_diversity to newer Luerl API return formats, related to Lua plugin loading and hook execution.
@@ -17,6 +19,7 @@
 - New per listener setting `active_n` to define the number of incoming TCP packets read
 - New feature: Listeners now can have individual authentication and authorization plugin chains (new `auth_n` and `auth_z` settings for named listeners).
 - Make VerneMQ run on Erlang/OTP 29.
+- Bugfix: Fix a session-takeover wedge where the queue could get stuck in `wait_for_offline` (never completing the takeover) when a draining session reported a state change instead of terminating. (#571, #1369)
 - Make VerneMQ run on Erlang/OTP 28.
 - Enhancement: Improved internode MQTT delivery with a connect-ack handshake, controlled by `outgoing_cluster_handshake_ack_timeout`, so cluster nodes only mark peers reachable after the receiving side has accepted the delivery connection.
 - Enhancement: Added bounded inbound buffering and frame validation for internode MQTT traffic, rejecting malformed or oversized cluster frames according to `incoming_clustering_buffer_size` instead of buffering them indefinitely.
