@@ -1,3 +1,9 @@
+## VerneMQ 2.2.1
+
+- Bugfix: Fix stale local shared subscriptions after trie restart
+- Spec compliance: enforce non-zero message ids.
+- Bugfix: Aggregate labelless graphite metrics to summarize instead of drop metrics
+- Bugfix: Fix `vmq_swc` dot-key-map GC on standalone nodes by ensuring the local watermark row is initialized. 
 - Dependency: Update Hackney to 4.7.4
 - Enhancement: Add `connect_options` to vmq_webhooks, defaults to [{no_delay, true}]. Fixes
   performance regression in Hackney (Nagle's).
